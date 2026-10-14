@@ -320,13 +320,17 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
                     if status in ("VERIFIED", "EMPTY"):
                         skip = True
                     elif status == "VERIFIED_PARTIAL":
+                        first_candle = pod.get("csv_first_candle")
                         last_candle = pod.get("csv_last_candle")
-                        if last_candle and "Time" in last_candle:
+                        if first_candle and "Time" in first_candle and last_candle and "Time" in last_candle:
+                            t_start_str = first_candle["Time"]
+                            first_dt = datetime.strptime(t_start_str[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
                             t_str = last_candle["Time"]
                             last_dt = datetime.strptime(t_str[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
                             
-                            # Smart Skip: 100% foolproof online check
-                            if last_dt >= global_latest_complete_dt:
+                            # Verify chunk has not been truncated (first candle matches expected start)
+                            expected_start = max(c_start, start_dt)
+                            if (first_dt - expected_start).days <= 10 and last_dt >= global_latest_complete_dt:
                                 skip = True
                                 if is_standalone:
                                     print(f"-> {os.path.basename(pf)} skipped (Already up-to-date with OANDA's latest complete candle)")

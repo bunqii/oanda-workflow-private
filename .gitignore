@@ -1,0 +1,14 @@
+# Environment & Secrets
+.env
+.env.*
+
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Temporary worker directories
+tmp_data/
+gh_clone_*
+debug_*
+test_*

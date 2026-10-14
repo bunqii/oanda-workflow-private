@@ -185,8 +185,8 @@ def write_chunk_to_disk(save_dir, symbol, timeframe, c_start, c_end, buf, now_ut
     p_sym = file_prefix if file_prefix else symbol
     p_tf  = file_tf if file_tf else timeframe
     
-    csv_file  = os.path.join(save_dir, f"{p_sym}_{p_tf}_{start_str}_to_{end_str}.csv")
-    pod_file  = csv_file.replace(".csv", ".pod")
+    parquet_file = os.path.join(save_dir, f"{p_sym}_{p_tf}_{start_str}_to_{end_str}.parquet")
+    pod_file     = parquet_file.replace(".parquet", ".pod")
 
     times_l, opens_l, highs_l, lows_l, closes_l, vols_l = (
         buf["times"], buf["opens"], buf["highs"], buf["lows"], buf["closes"], buf["vols"])
@@ -224,17 +224,31 @@ def write_chunk_to_disk(save_dir, symbol, timeframe, c_start, c_end, buf, now_ut
     else:
         status = "VERIFIED_PARTIAL" if c_end > now_utc else ("EMPTY" if is_empty else "VERIFIED")
 
-    with open(csv_file, 'w') as f:
-        if n > 0:
-            f.write("Time,Open,High,Low,Close,Volume\n")
-            f.write("\n".join(f"{times_l[i]},{opens_l[i]},{highs_l[i]},{lows_l[i]},{closes_l[i]},{vols_l[i]}" for i in range(n)))
-            f.write("\n")
+    if n > 0:
+        import pandas as pd
+        df = pd.DataFrame({
+            "Time": times_l,
+            "Open": opens_l,
+            "High": highs_l,
+            "Low": lows_l,
+            "Close": closes_l,
+            "Volume": vols_l
+        })
+        df["Open"] = df["Open"].astype(float)
+        df["High"] = df["High"].astype(float)
+        df["Low"] = df["Low"].astype(float)
+        df["Close"] = df["Close"].astype(float)
+        df["Volume"] = df["Volume"].astype("int64")
+        df.to_parquet(parquet_file, compression="snappy", index=False)
 
     pod = {
-        "pod_version": "3.6",
+        "pod_version": "4.0",
         "instrument": symbol, "granularity": timeframe,
         "chunk_start": start_str, "chunk_end": end_str,
-        "csv_file": os.path.basename(csv_file),
+        "parquet_file": os.path.basename(parquet_file),
+        "data_file": os.path.basename(parquet_file),
+        "row_count": n, "first_candle": first_candle, "last_candle": last_candle,
+        "csv_file": os.path.basename(parquet_file),
         "csv_row_count": n, "csv_first_candle": first_candle, "csv_last_candle": last_candle,
         "status": status,
         "verified_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000000000Z"),
@@ -250,7 +264,7 @@ def write_chunk_to_disk(save_dir, symbol, timeframe, c_start, c_end, buf, now_ut
     with open(pod_file, "w") as f:
         json.dump(pod, f, indent=2)
 
-    return os.path.basename(csv_file), n, status
+    return os.path.basename(parquet_file), n, status
 
 # -----------------------------------------------------------------------------
 # Main
@@ -312,16 +326,19 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
             p_sym = file_prefix if file_prefix else symbol
             p_tf  = file_tf if file_tf else timeframe
             pf = os.path.join(save_dir, f"{p_sym}_{p_tf}_{ss}_to_{es}.pod")
+            parquet_f = os.path.join(save_dir, f"{p_sym}_{p_tf}_{ss}_to_{es}.parquet")
+            csv_f = os.path.join(save_dir, f"{p_sym}_{p_tf}_{ss}_to_{es}.csv")
+            data_file_exists = os.path.exists(parquet_f) or os.path.exists(csv_f)
             skip = False
-            if os.path.exists(pf):
+            if os.path.exists(pf) and data_file_exists:
                 try:
                     pod = json.load(open(pf))
                     status = pod.get("status")
                     if status in ("VERIFIED", "EMPTY"):
                         skip = True
                     elif status == "VERIFIED_PARTIAL":
-                        first_candle = pod.get("csv_first_candle")
-                        last_candle = pod.get("csv_last_candle")
+                        first_candle = pod.get("first_candle") or pod.get("csv_first_candle")
+                        last_candle = pod.get("last_candle") or pod.get("csv_last_candle")
                         if first_candle and "Time" in first_candle and last_candle and "Time" in last_candle:
                             t_start_str = first_candle["Time"]
                             first_dt = datetime.strptime(t_start_str[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)

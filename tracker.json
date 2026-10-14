@@ -7,6 +7,18 @@
       "chunks_count": 3,
       "platform": "GitHub",
       "last_updated": "2026-10-14T22:34:47.226048+00:00"
+    },
+    "GitHub": {},
+    "HuggingFace": {
+      "60": {
+        "first_candle": "2026-10-01T00:00:00.000000000Z",
+        "last_candle": "2026-10-14T22:00:00.000000000Z",
+        "total_rows": 229,
+        "chunks_count": 248,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-14T23:05:30.609489+00:00"
+      }
     }
   },
   "BTC_USD": {
@@ -20,7 +32,19 @@
       "chunks_count": 3,
       "platform": "GitHub",
       "last_updated": "2026-10-14T22:46:48.195671+00:00"
-    }
+    },
+    "GitHub": {
+      "D": {
+        "first_candle": "2020-01-01T22:00:00.000000000Z",
+        "last_candle": "2026-10-13T21:00:00.000000000Z",
+        "total_rows": 1755,
+        "chunks_count": 3,
+        "format": "csv",
+        "platform": "GitHub",
+        "last_updated": "2026-10-14T23:02:08.145715+00:00"
+      }
+    },
+    "HuggingFace": {}
   },
   "CHF_JPY": {
     "D": {
@@ -30,7 +54,19 @@
       "chunks_count": 3,
       "platform": "GitHub",
       "last_updated": "2026-10-14T22:46:56.040088+00:00"
-    }
+    },
+    "GitHub": {
+      "D": {
+        "first_candle": "2020-01-01T22:00:00.000000000Z",
+        "last_candle": "2026-10-13T21:00:00.000000000Z",
+        "total_rows": 1761,
+        "chunks_count": 3,
+        "format": "csv",
+        "platform": "GitHub",
+        "last_updated": "2026-10-14T23:02:19.787213+00:00"
+      }
+    },
+    "HuggingFace": {}
   },
   "NZD_SGD": {
     "D": {
@@ -40,7 +76,19 @@
       "chunks_count": 3,
       "platform": "GitHub",
       "last_updated": "2026-10-14T22:47:03.557827+00:00"
-    }
+    },
+    "GitHub": {
+      "D": {
+        "first_candle": "2020-01-01T22:00:00.000000000Z",
+        "last_candle": "2026-10-13T21:00:00.000000000Z",
+        "total_rows": 1763,
+        "chunks_count": 3,
+        "format": "csv",
+        "platform": "GitHub",
+        "last_updated": "2026-10-14T23:02:31.477233+00:00"
+      }
+    },
+    "HuggingFace": {}
   },
   "GBP_NZD": {
     "D": {
@@ -50,7 +98,19 @@
       "chunks_count": 3,
       "platform": "GitHub",
       "last_updated": "2026-10-14T22:47:13.131276+00:00"
-    }
+    },
+    "GitHub": {
+      "D": {
+        "first_candle": "2020-01-01T22:00:00.000000000Z",
+        "last_candle": "2026-10-13T21:00:00.000000000Z",
+        "total_rows": 1763,
+        "chunks_count": 3,
+        "format": "csv",
+        "platform": "GitHub",
+        "last_updated": "2026-10-14T23:02:41.345181+00:00"
+      }
+    },
+    "HuggingFace": {}
   },
   "XAU_CHF": {
     "D": {
@@ -60,7 +120,19 @@
       "chunks_count": 3,
       "platform": "GitHub",
       "last_updated": "2026-10-14T22:47:20.362202+00:00"
-    }
+    },
+    "GitHub": {
+      "D": {
+        "first_candle": "2020-01-01T22:00:00.000000000Z",
+        "last_candle": "2026-10-13T21:00:00.000000000Z",
+        "total_rows": 1752,
+        "chunks_count": 3,
+        "format": "csv",
+        "platform": "GitHub",
+        "last_updated": "2026-10-14T23:02:48.730669+00:00"
+      }
+    },
+    "HuggingFace": {}
   },
   "USD_MXN": {
     "D": {
@@ -70,6 +142,30 @@
       "chunks_count": 3,
       "platform": "GitHub",
       "last_updated": "2026-10-14T22:47:27.829204+00:00"
-    }
+    },
+    "GitHub": {
+      "D": {
+        "first_candle": "2020-01-01T22:00:00.000000000Z",
+        "last_candle": "2026-10-13T21:00:00.000000000Z",
+        "total_rows": 1761,
+        "chunks_count": 3,
+        "format": "csv",
+        "platform": "GitHub",
+        "last_updated": "2026-10-14T23:02:57.876659+00:00"
+      }
+    },
+    "HuggingFace": {}
+  },
+  "GBP_USD": {
+    "GitHub": {},
+    "HuggingFace": {}
+  },
+  "USB05Y_USD": {
+    "GitHub": {},
+    "HuggingFace": {}
+  },
+  "UK10YB_GBP": {
+    "GitHub": {},
+    "HuggingFace": {}
   }
 }

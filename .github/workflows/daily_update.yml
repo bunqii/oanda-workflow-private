@@ -31,7 +31,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests httpx numpy pandas python-dateutil huggingface_hub
+          pip install requests "httpx[http2]" h2 numpy pandas python-dateutil huggingface_hub
 
       - name: Configure Git for tracker commits
         run: |

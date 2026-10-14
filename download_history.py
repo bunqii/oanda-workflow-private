@@ -259,7 +259,12 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
     os.makedirs(save_dir, exist_ok=True)
     now_utc = datetime.now(timezone.utc)
 
-    async with httpx.AsyncClient(http2=True, headers=HEADERS) as client:
+    try:
+        client_ctx = httpx.AsyncClient(http2=True, headers=HEADERS)
+    except Exception:
+        client_ctx = httpx.AsyncClient(headers=HEADERS)
+
+    async with client_ctx as client:
         # Start date handling
         if not start_dt:
             start_dt = await find_inception(client, symbol, timeframe)

@@ -67,10 +67,11 @@ def get_hf_username():
         pass
     return ""
 
-def ensure_github_repo(repo_name, private=True):
+def ensure_github_repo(repo_name, private=False):
     """
     Checks if repository exists first via GET to prevent hitting
     GitHub's secondary rate limits on repository creation.
+    Ensures the repository is PUBLIC.
     """
     gh_user = get_gh_username()
     headers = {
@@ -81,7 +82,11 @@ def ensure_github_repo(repo_name, private=True):
     try:
         res = requests.get(check_url, headers=headers, timeout=10)
         if res.status_code == 200:
-            return True  # Exists, no POST needed!
+            repo_info = res.json()
+            if repo_info.get("private") and not private:
+                print(f"     Converting GitHub repository {repo_name} to public...")
+                requests.patch(check_url, headers=headers, json={"private": False})
+            return True  # Exists!
     except Exception as e:
         print(f"[!] Network error checking repo {repo_name}: {e}")
         return False
@@ -182,7 +187,7 @@ def check_github_tf_uptodate(gh_user, repo_name, tf):
 
 def sync_ticker_github(inst_name, repo_name, tracker):
     gh_user = get_gh_username()
-    if not ensure_github_repo(repo_name, private=True):
+    if not ensure_github_repo(repo_name, private=False):
         print(f"     [!] Could not access or create repository {repo_name}. Skipping for now.")
         return False
     
@@ -300,12 +305,15 @@ def sync_ticker_huggingface(inst_name, repo_name, tracker):
     hf_user = get_hf_username()
     repo_id = f"{hf_user}/{repo_name}"
     
-    # 1. Ensure private dataset repo exists on Hugging Face
+    # 1. Ensure public dataset repo exists on Hugging Face
     try:
-        api.repo_info(repo_id=repo_id, repo_type="dataset")
+        r_info = api.repo_info(repo_id=repo_id, repo_type="dataset")
+        if r_info.private:
+            print(f"     Converting Hugging Face dataset {repo_id} to public...")
+            api.update_repo_settings(repo_id=repo_id, private=False, repo_type="dataset")
     except Exception:
         try:
-            api.create_repo(repo_id=repo_id, repo_type="dataset", private=True)
+            api.create_repo(repo_id=repo_id, repo_type="dataset", private=False)
         except Exception as e:
             print(f"[!] Hugging Face create_repo info: {e}")
 

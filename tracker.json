@@ -1851,5 +1851,65 @@
         "last_updated": "2026-10-15T22:45:52.828101+00:00"
       }
     }
+  },
+  "USD_NOK": {
+    "GitHub": {
+      "1": {
+        "first_candle": "2003-09-01T20:57:00.000000000Z",
+        "last_candle": "2004-07-30T20:59:00.000000000Z",
+        "total_rows": 286,
+        "chunks_count": 11,
+        "format": "parquet",
+        "platform": "GitHub",
+        "last_updated": "2026-10-15T22:46:02.664613+00:00"
+      },
+      "D": {
+        "first_candle": null,
+        "last_candle": null,
+        "total_rows": 0,
+        "chunks_count": 3,
+        "format": "parquet",
+        "platform": "GitHub",
+        "last_updated": "2026-10-15T22:46:05.057641+00:00"
+      }
+    },
+    "HuggingFace": {
+      "1": {
+        "first_candle": "2003-09-01T20:57:00.000000000Z",
+        "last_candle": "2004-07-30T20:59:00.000000000Z",
+        "total_rows": 286,
+        "chunks_count": 11,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-15T22:46:08.616798+00:00"
+      },
+      "5": {
+        "first_candle": "2003-09-01T20:55:00.000000000Z",
+        "last_candle": "2006-04-30T23:55:00.000000000Z",
+        "total_rows": 69363,
+        "chunks_count": 34,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-15T22:46:14.364731+00:00"
+      },
+      "60": {
+        "first_candle": "2003-09-01T20:00:00.000000000Z",
+        "last_candle": "2005-12-30T21:00:00.000000000Z",
+        "total_rows": 6851,
+        "chunks_count": 32,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-15T22:46:20.348021+00:00"
+      },
+      "D": {
+        "first_candle": "2003-09-01T21:00:00.000000000Z",
+        "last_candle": "2026-10-14T21:00:00.000000000Z",
+        "total_rows": 6723,
+        "chunks_count": 3,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-15T22:46:21.667158+00:00"
+      }
+    }
   }
 }

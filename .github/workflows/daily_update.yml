@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       timeframes:
-        description: 'Timeframes to download (e.g. D or D,60,5,1,5S)'
+        description: 'Timeframes to download (e.g. 5S,1,5,60,D)'
         required: false
-        default: 'D'
+        default: '5S,1,5,60,D'
       ticker_filter:
         description: 'Optional: Filter to single ticker (e.g. XAU_USD or BTC_USD). Leave blank for all.'
         required: false

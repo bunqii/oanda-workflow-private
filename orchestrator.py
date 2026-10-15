@@ -13,17 +13,27 @@ GH_TOKEN = os.environ.get("GITHUB_TOKEN") or os.environ.get("PAT_TOKEN") or env_
 HF_TOKEN = os.environ.get("HF_TOKEN") or env_vars.get("HF_TOKEN")
 GH_USERNAME = os.environ.get("GH_USERNAME") or env_vars.get("GH_USERNAME", "")
 
+TF_ALIASES = {
+    "5S": "5S", "S5": "5S",
+    "1": "1", "1M": "1", "M1": "1",
+    "5": "5", "5M": "5", "M5": "5",
+    "60": "60", "60M": "60", "H1": "60", "1H": "60",
+    "D": "D", "DAILY": "D", "1D": "D"
+}
+
 tf_env = os.environ.get("TIMEFRAMES")
 if tf_env and tf_env.strip():
-    TIMEFRAMES_TO_TEST = [t.strip() for t in tf_env.split(",") if t.strip()]
+    raw_tfs = [t.strip().upper() for t in tf_env.split(",") if t.strip()]
+    TIMEFRAMES_TO_TEST = [TF_ALIASES.get(t, t) for t in raw_tfs]
 else:
-    TIMEFRAMES_TO_TEST = ["D"]
+    TIMEFRAMES_TO_TEST = ["5S", "1", "5", "60", "D"]
 
-# Mapping of Timeframe to Target Platform (True = HuggingFace, False = GitHub)
-TF_TO_HF = {
-    "5S": True, "5": True, "60": True,
-    "1": False, "D": False
-}
+# Platform routing:
+# GitHub gets 1m ('1') and Daily ('D')
+GITHUB_TIMEFRAMES = {"1", "D"}
+
+# Hugging Face gets all timeframes: 5S, 1m ('1'), 5m ('5'), 60m ('60'), and Daily ('D')
+HUGGINGFACE_TIMEFRAMES = {"5S", "1", "5", "60", "D"}
 
 def get_all_instruments():
     account_id = os.environ.get('OANDA_ACCOUNT_ID') or env_vars.get('OANDA_ACCOUNT_ID')
@@ -199,8 +209,8 @@ def sync_ticker_github(inst_name, repo_name, tracker):
     
     # 1. Quick remote check: check which timeframes are already verified on GitHub
     for tf in TIMEFRAMES_TO_TEST:
-        if TF_TO_HF.get(tf, False):
-            continue  # Handled on Hugging Face
+        if tf not in GITHUB_TIMEFRAMES:
+            continue
             
         is_up, pod_meta = check_github_tf_uptodate(gh_user, repo_name, tf)
         if is_up and pod_meta:
@@ -334,8 +344,8 @@ def sync_ticker_huggingface(inst_name, repo_name, tracker):
     updated_any = False
     
     for tf in TIMEFRAMES_TO_TEST:
-        if not TF_TO_HF.get(tf, False):
-            continue  # Handled on GitHub
+        if tf not in HUGGINGFACE_TIMEFRAMES:
+            continue
             
         print(f"  -> Timeframe {tf} (Target: HuggingFace)")
         
@@ -380,13 +390,18 @@ def sync_ticker_huggingface(inst_name, repo_name, tracker):
         tf_dir = os.path.join(hf_base_dir, tf)
         os.makedirs(tf_dir, exist_ok=True)
         
-        oanda_tf = map_oanda_tf(tf)
-        chunk_size = get_chunk_size(tf)
-        
-        bulk_download_and_split(
-            inst_name, oanda_tf, None, None, chunk_size, tf_dir,
-            file_prefix=repo_name, file_tf=tf
-        )
+        local_gh_dir = os.path.join(f"gh_clone_{repo_name}", tf)
+        if os.path.exists(local_gh_dir) and any(f.endswith(".parquet") for f in os.listdir(local_gh_dir)):
+            print(f"     Reusing already downloaded {tf} files from GitHub clone for Hugging Face...")
+            for f in os.listdir(local_gh_dir):
+                shutil.copy2(os.path.join(local_gh_dir, f), os.path.join(tf_dir, f))
+        else:
+            oanda_tf = map_oanda_tf(tf)
+            chunk_size = get_chunk_size(tf)
+            bulk_download_and_split(
+                inst_name, oanda_tf, None, None, chunk_size, tf_dir,
+                file_prefix=repo_name, file_tf=tf
+            )
         
         pod_files = sorted([f for f in os.listdir(tf_dir) if f.endswith(".pod")])
         parquet_files = sorted([f for f in os.listdir(tf_dir) if f.endswith(".parquet")])
@@ -475,8 +490,8 @@ def main():
             if "HuggingFace" not in tracker[inst_name]:
                 tracker[inst_name]["HuggingFace"] = {}
             
-        has_gh = any(not TF_TO_HF.get(tf, False) for tf in TIMEFRAMES_TO_TEST)
-        has_hf = any(TF_TO_HF.get(tf, False) for tf in TIMEFRAMES_TO_TEST)
+        has_gh = any(tf in GITHUB_TIMEFRAMES for tf in TIMEFRAMES_TO_TEST)
+        has_hf = any(tf in HUGGINGFACE_TIMEFRAMES for tf in TIMEFRAMES_TO_TEST)
         
         up_gh = False
         up_hf = False
@@ -485,6 +500,10 @@ def main():
             up_gh = sync_ticker_github(inst_name, repo_name, tracker)
         if has_hf:
             up_hf = sync_ticker_huggingface(inst_name, repo_name, tracker)
+            
+        clone_dir = f"gh_clone_{repo_name}"
+        if os.path.exists(clone_dir):
+            shutil.rmtree(clone_dir, ignore_errors=True)
             
         # Update tracker after processing each ticker
         print(f"  -> Saving verified tracker metadata for {inst_name}")

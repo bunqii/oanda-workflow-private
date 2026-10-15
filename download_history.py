@@ -386,40 +386,25 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
                             expected_start = max(c_start, start_dt)
                             if (first_dt - expected_start).days <= 10 and last_dt >= global_latest_complete_dt:
                                 skip = True
-                                if is_standalone:
-                                    print(f"-> {os.path.basename(pf)} skipped (Already up-to-date with OANDA's latest complete candle)")
-                                else:
-                                    print(f"  -> {os.path.basename(pf)} skipped (Up-to-date)")
                 except Exception:
                     pass
             if not skip:
                 unverified_chunks.append((c_start, c_end))
 
+        skipped_count = len(all_chunks) - len(unverified_chunks)
         if not unverified_chunks:
-            if is_standalone:
-                print("All chunks verified! Nothing to do.")
-            else:
-                print("  -> All chunks verified (Up-to-date)")
+            print(f"  * {symbol} ({timeframe}): All {len(all_chunks)} chunks up-to-date (cached)")
             return
 
-        if is_standalone:
-            print(f"-> {len(all_chunks)-len(unverified_chunks)} skipped | {len(unverified_chunks)} to download")
-        else:
-            print(f"  -> {len(unverified_chunks)} chunk(s) to update")
+        print(f"  * {symbol} ({timeframe}): {skipped_count} chunks cached | {len(unverified_chunks)} chunk(s) to download")
 
         fetch_start = max(unverified_chunks[0][0], start_dt)
         max_valid_fetch_end = global_latest_complete_dt + timedelta(minutes=TIMEFRAME_MINUTES[timeframe])
         fetch_end   = min(unverified_chunks[-1][1], end_dt, max_valid_fetch_end)
         
         if fetch_start >= fetch_end:
-            if is_standalone:
-                print(f"-> All requested data up to {fetch_end} is already verified or in the future.")
-            else:
-                print(f"  -> All data up to {fetch_end} already verified.")
+            print(f"  * {symbol} ({timeframe}): All data up to {fetch_end.strftime('%Y-%m-%d')} already verified")
             return
-
-        if is_standalone:
-            print(f"\n[NETWORK] {fetch_start} to {fetch_end}")
 
         block_dur  = timedelta(minutes=5000 * TIMEFRAME_MINUTES[timeframe])
         api_blocks = []
@@ -428,8 +413,7 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
             nxt = min(cur + block_dur, fetch_end)
             api_blocks.append((cur, nxt))
             cur = nxt
-        if is_standalone:
-            print(f"-> {len(api_blocks)} API blocks")
+        print(f"    Fetching {len(api_blocks)} API blocks ({fetch_start.strftime('%Y-%m-%d')} -> {fetch_end.strftime('%Y-%m-%d')})...")
 
         # 3. Pre-compute block↔chunk overlap
         c_start_strs = [c.strftime("%Y-%m-%dT%H:%M:%S.000000000Z") for c, _ in unverified_chunks]
@@ -550,26 +534,24 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
                 await asyncio.sleep(sleep_time)
                 loop_iteration += 1
 
-        print(f"\n[NETWORK] Done in {time.time()-total_start:.2f}s")
-
-        print(f"[STORAGE] Waiting for {len(write_futures)} chunk writes...")
+        total_rows_saved = 0
+        chunks_saved = 0
+        t_net = time.time() - total_start
         try:
             for c_idx, fut in write_futures:
                 fname, rows, status = fut.result()
-                if is_standalone:
-                    print(f"Saved: {fname} | Rows: {rows} | Status: {status}")
-                else:
-                    print(f"  -> Saved: {fname} ({rows} rows)")
+                total_rows_saved += rows
+                chunks_saved += 1
+                if len(write_futures) <= 3:
+                    print(f"    Saved: {fname} ({rows:,} rows)")
+            if len(write_futures) > 3:
+                print(f"    Saved {chunks_saved} chunks ({total_rows_saved:,} rows) in {time.time()-total_start-t_net:.1f}s")
         except Exception as e:
-            print(f"[STORAGE] Error writing chunk: {e}")
+            print(f"    [Error] Writing chunk: {e}")
         finally:
             write_pool.shutdown(wait=False)
 
-        print(f"\nTotal time: {time.time()-total_start:.2f}s")
-
-    print("==================================================")
-    print("Done!")
-    print("==================================================")
+        print(f"    Download finished in {time.time()-total_start:.1f}s")
 
 def bulk_download_and_split(symbol, timeframe, start_dt, end_dt, chunk_size, save_dir, seconds_per_candle=None, file_prefix=None, file_tf=None):
     """

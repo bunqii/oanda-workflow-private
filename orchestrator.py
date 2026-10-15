@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import json
 import shutil
@@ -6,6 +7,27 @@ import base64
 import requests
 import subprocess
 from datetime import datetime, timezone
+
+# Reconfigure stdout/stderr to UTF-8 if possible
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+if hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+# Disable Hugging Face tqdm progress bars to avoid log spam
+os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+try:
+    from huggingface_hub.utils import disable_progress_bars
+    disable_progress_bars()
+except Exception:
+    pass
+
 from huggingface_hub import HfApi, hf_hub_download
 from download_history import bulk_download_and_split, OANDA_URL, HEADERS, env_vars
 
@@ -38,10 +60,13 @@ HUGGINGFACE_TIMEFRAMES = {"5S", "1", "5", "60", "D"}
 def get_all_instruments():
     account_id = os.environ.get('OANDA_ACCOUNT_ID') or env_vars.get('OANDA_ACCOUNT_ID')
     url = f"{OANDA_URL}/accounts/{account_id}/instruments"
-    res = requests.get(url, headers=HEADERS)
-    if res.status_code == 200:
-        instruments = res.json().get("instruments", [])
-        return {inst['name']: inst for inst in instruments}
+    try:
+        res = requests.get(url, headers=HEADERS, timeout=15)
+        if res.status_code == 200:
+            instruments = res.json().get("instruments", [])
+            return {inst['name']: inst for inst in instruments}
+    except Exception:
+        pass
     return {}
 
 def run_cmd(cmd, cwd=None):
@@ -50,7 +75,7 @@ def run_cmd(cmd, cwd=None):
     else:
         res = subprocess.run(cmd, shell=True, cwd=cwd, text=True, capture_output=True)
     if res.returncode != 0 and "already exists" not in res.stderr and "nothing to commit" not in res.stdout:
-        print(f"[!] Command failed: {cmd}\n{res.stderr}")
+        print(f"  [!] Command failed: {cmd}\n{res.stderr.strip()}")
         return False
     return True
 
@@ -59,7 +84,7 @@ def get_gh_username():
     if user:
         return user
     try:
-        res = requests.get("https://api.github.com/user", headers={"Authorization": f"token {GH_TOKEN}"})
+        res = requests.get("https://api.github.com/user", headers={"Authorization": f"token {GH_TOKEN}"}, timeout=10)
         if res.status_code == 200:
             return res.json().get("login", "")
     except Exception:
@@ -94,11 +119,11 @@ def ensure_github_repo(repo_name, private=False):
         if res.status_code == 200:
             repo_info = res.json()
             if repo_info.get("private") and not private:
-                print(f"     Converting GitHub repository {repo_name} to public...")
+                print(f"  * Converting GitHub repository {repo_name} to public...")
                 requests.patch(check_url, headers=headers, json={"private": False})
-            return True  # Exists!
+            return True
     except Exception as e:
-        print(f"[!] Network error checking repo {repo_name}: {e}")
+        print(f"  [!] Network error checking repo {repo_name}: {e}")
         return False
 
     payload = {
@@ -111,11 +136,11 @@ def ensure_github_repo(repo_name, private=False):
         if post_res.status_code in [201, 422]:
             return True
         if post_res.status_code == 403:
-            print(f"[!] GitHub repo creation rate-limited (403). Secondary limit reached.")
+            print(f"  [!] GitHub repo creation rate-limited (403).")
             return False
-        print(f"[!] GitHub repo creation failed ({post_res.status_code}): {post_res.text[:120]}")
+        print(f"  [!] GitHub repo creation failed ({post_res.status_code}): {post_res.text[:120]}")
     except Exception as e:
-        print(f"[!] Exception creating repo {repo_name}: {e}")
+        print(f"  [!] Exception creating repo {repo_name}: {e}")
     return False
 
 def get_candle_dt(candle):
@@ -144,10 +169,20 @@ def get_candle_time_str(candle):
         return datetime.fromtimestamp(t, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000000000Z")
     return str(t)
 
+def clean_date_display(val):
+    if not val:
+        return "-"
+    if isinstance(val, (int, float)):
+        return datetime.fromtimestamp(val, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+    s = str(val).strip()
+    if len(s) >= 16 and "T" in s:
+        return s[:16].replace("T", " ")
+    return s[:10]
+
 def get_repo_name(inst_name, inst_dict):
-    display = inst_dict[inst_name].get('displayName', '').replace('/', '').replace('\\', '').replace(' ', '-')
+    display = inst_dict.get(inst_name, {}).get('displayName', '').replace('/', '').replace('\\', '').replace(' ', '-')
     name_no_us = inst_name.replace("_", "")
-    return f"OANDA_{name_no_us}_{display}"
+    return f"OANDA_{name_no_us}_{display}" if display else f"OANDA_{name_no_us}"
 
 def get_chunk_size(tf):
     if tf == "D": return "10_year"
@@ -161,11 +196,103 @@ def map_oanda_tf(tf):
     if tf == "60": return "H1"
     return "D"
 
+# -----------------------------------------------------------------------------
+# Summary Tracker
+# -----------------------------------------------------------------------------
+class SyncSummaryTracker:
+    def __init__(self):
+        self.records = []
+        self.repo_links = {}     # ticker: {"GitHub": url, "HuggingFace": url}
+        self.push_links = {}     # ticker: {"GitHub": [url], "HuggingFace": [url]}
+
+    def add_record(self, ticker, platform, tf, chunks, rows, first_dt, last_dt, status, link):
+        d_range = f"{clean_date_display(first_dt)} -> {clean_date_display(last_dt)}" if (first_dt and last_dt) else "-"
+        # Update existing record if same ticker, platform, tf
+        for r in self.records:
+            if r["ticker"] == ticker and r["platform"] == platform and r["tf"] == tf:
+                r.update({
+                    "chunks": chunks or 0,
+                    "rows": rows or 0,
+                    "date_range": d_range,
+                    "status": status,
+                    "link": link
+                })
+                return
+        self.records.append({
+            "ticker": ticker,
+            "platform": platform,
+            "tf": tf,
+            "chunks": chunks or 0,
+            "rows": rows or 0,
+            "date_range": d_range,
+            "status": status,
+            "link": link
+        })
+
+    def record_repo(self, ticker, platform, url):
+        if ticker not in self.repo_links:
+            self.repo_links[ticker] = {}
+        self.repo_links[ticker][platform] = url
+
+    def record_push(self, ticker, platform, push_url):
+        if ticker not in self.push_links:
+            self.push_links[ticker] = {}
+        if platform not in self.push_links[ticker]:
+            self.push_links[ticker][platform] = []
+        if push_url not in self.push_links[ticker][platform]:
+            self.push_links[ticker][platform].append(push_url)
+
+    def print_ticker_summary(self, ticker, repo_name):
+        ticker_records = [r for r in self.records if r["ticker"] == ticker]
+        if not ticker_records:
+            return
+
+        border = "=" * 122
+        sep = "-" * 122
+        title = f"DATA SYNC SUMMARY: {ticker} ({repo_name})"
+
+        print(f"\n{border}")
+        print(f"{title.center(122)}")
+        print(border)
+        print(f"{'Platform':<12} {'TF':<5} {'Chunks':>8} {'Total Rows':>14}   {'Date Range (UTC)':<37} {'Status':<11} {'Direct Link'}")
+        print(sep)
+
+        tf_order = {"D": 1, "60": 2, "5": 3, "1": 4, "5S": 5}
+        sorted_records = sorted(
+            ticker_records,
+            key=lambda r: (0 if r["platform"] == "GitHub" else 1, tf_order.get(r["tf"], 99))
+        )
+
+        for r in sorted_records:
+            print(f"{r['platform']:<12} {r['tf']:<5} {r['chunks']:>8,d} {r['rows']:>14,d}   {r['date_range']:<37} {r['status']:<11} {r['link']}")
+
+        print(sep)
+        gh_url = self.repo_links.get(ticker, {}).get("GitHub", "")
+        hf_url = self.repo_links.get(ticker, {}).get("HuggingFace", "")
+        gh_pushes = self.push_links.get(ticker, {}).get("GitHub", [])
+        hf_pushes = self.push_links.get(ticker, {}).get("HuggingFace", [])
+
+        print("Repository Links & Latest Pushes:")
+        if gh_url:
+            print(f"  * GitHub Repository:       {gh_url}")
+            if gh_pushes:
+                for p in gh_pushes:
+                    print(f"    --> Pushed Commit:        {p}")
+            else:
+                print(f"    --> Push Status:          Up-to-date (No new commit)")
+        if hf_url:
+            print(f"  * HuggingFace Dataset:     {hf_url}")
+            if hf_pushes:
+                for p in hf_pushes:
+                    print(f"    --> Pushed Commit:        {p}")
+            else:
+                print(f"    --> Push Status:          Up-to-date (No new commit)")
+        print(f"{border}\n")
+
+# -----------------------------------------------------------------------------
+# GitHub Sync
+# -----------------------------------------------------------------------------
 def check_github_tf_uptodate(gh_user, repo_name, tf):
-    """
-    Checks if a timeframe is already up-to-date on GitHub by querying the pod file
-    metadata directly through GitHub Contents API (without doing a heavy git clone).
-    """
     headers = {
         "Authorization": f"token {GH_TOKEN}",
         "Accept": "application/vnd.github+json"
@@ -185,7 +312,6 @@ def check_github_tf_uptodate(gh_user, repo_name, tf):
         if not pod_items or not data_items:
             return False, None
 
-        # Fetch first pod for inception candle and latest pod for current candle
         first_pod_item = pod_items[0]
         latest_pod_item = pod_items[-1]
         
@@ -204,11 +330,9 @@ def check_github_tf_uptodate(gh_user, repo_name, tf):
         last_candle = pod_data_last.get("last_candle") or pod_data_last.get("csv_last_candle")
         first_candle = pod_data_first.get("first_candle") or pod_data_first.get("csv_first_candle")
         
-        # Check if last candle is up to today or yesterday
         if last_candle:
             last_dt = get_candle_dt(last_candle)
             now_dt = datetime.now(timezone.utc)
-            # If latest candle is within 2 days (weekend / market close aware), chunk is up-to-date
             if last_dt and (now_dt - last_dt).days <= 2 and status in ["VERIFIED", "VERIFIED_PARTIAL"]:
                 return True, {
                     "first_candle": get_candle_time_str(first_candle),
@@ -221,62 +345,73 @@ def check_github_tf_uptodate(gh_user, repo_name, tf):
         pass
     return False, None
 
-def sync_ticker_github(inst_name, repo_name, tracker):
+def sync_ticker_github(inst_name, repo_name, tracker, summary_tracker):
     gh_user = get_gh_username()
+    repo_url = f"https://github.com/{gh_user}/{repo_name}"
+    summary_tracker.record_repo(inst_name, "GitHub", repo_url)
+
     if not ensure_github_repo(repo_name, private=False):
-        print(f"     [!] Could not access or create repository {repo_name}. Skipping for now.")
+        print(f"  [!] Could not access or create GitHub repository {repo_name}. Skipping GitHub sync.")
         return False
     
-    # Initialize separate GitHub tracker for this ticker
     if "GitHub" not in tracker[inst_name]:
         tracker[inst_name]["GitHub"] = {}
 
     timeframes_to_download = []
     
-    # 1. Quick remote check: check which timeframes are already verified on GitHub
+    # Quick remote check
     for tf in TIMEFRAMES_TO_TEST:
         if tf not in GITHUB_TIMEFRAMES:
             continue
             
         is_up, pod_meta = check_github_tf_uptodate(gh_user, repo_name, tf)
         if is_up and pod_meta:
-            print(f"  -> Timeframe {tf} (GitHub): Already up-to-date ({pod_meta['chunks_count']} chunks, last: {pod_meta['last_candle']}). Smart skip.")
-            existing_total = tracker.get(inst_name, {}).get("GitHub", {}).get(tf, {}).get("total_rows")
-            if existing_total and existing_total > pod_meta.get("total_rows", 0):
-                pod_meta["total_rows"] = existing_total
+            existing_total = tracker.get(inst_name, {}).get("GitHub", {}).get(tf, {}).get("total_rows") or pod_meta.get("total_rows", 0)
+            print(f"  * [GitHub] {tf}: Up-to-date ({pod_meta['chunks_count']} chunks, {existing_total:,} rows)")
             tracker[inst_name]["GitHub"][tf] = {
                 **pod_meta,
+                "total_rows": existing_total,
                 "platform": "GitHub",
                 "last_updated": datetime.now(timezone.utc).isoformat()
             }
+            summary_tracker.add_record(
+                ticker=inst_name,
+                platform="GitHub",
+                tf=tf,
+                chunks=pod_meta['chunks_count'],
+                rows=existing_total,
+                first_dt=pod_meta.get('first_candle'),
+                last_dt=pod_meta.get('last_candle'),
+                status="Up-to-date",
+                link=f"{repo_url}/tree/main/{tf}"
+            )
         else:
             timeframes_to_download.append(tf)
 
     if not timeframes_to_download:
-        return False  # All GitHub timeframes already up-to-date!
+        return False
 
-    # 2. Shallow clone (--depth 1) only when there are chunks to update
     clone_dir = f"gh_clone_{repo_name}"
     if os.path.exists(clone_dir):
         shutil.rmtree(clone_dir, ignore_errors=True)
         
-    print(f"     Cloning repository {gh_user}/{repo_name} (shallow --depth 1)...")
-    clone_ok = run_cmd(f"git clone --depth 1 https://x-access-token:{GH_TOKEN}@github.com/{gh_user}/{repo_name}.git {clone_dir}")
+    print(f"  * [GitHub] Fetching repository {gh_user}/{repo_name}...")
+    clone_ok = run_cmd(f"git clone --quiet --depth 1 https://x-access-token:{GH_TOKEN}@github.com/{gh_user}/{repo_name}.git {clone_dir}")
     if not clone_ok:
-        print(f"[!] Could not clone {repo_name}. Skipping.")
+        print(f"  [!] Could not clone {repo_name}. Skipping GitHub sync.")
         return False
         
     updated_any = False
-    
+    new_tfs_processed = []
+
     for tf in timeframes_to_download:
-        print(f"  -> Timeframe {tf} (Target: GitHub)")
+        print(f"  * [GitHub] Syncing timeframe {tf}...")
         tf_dir = os.path.join(clone_dir, tf)
         os.makedirs(tf_dir, exist_ok=True)
         
         oanda_tf = map_oanda_tf(tf)
         chunk_size = get_chunk_size(tf)
         
-        # Download directly into repo directory
         bulk_download_and_split(
             inst_name, oanda_tf, None, None, chunk_size, tf_dir,
             file_prefix=repo_name, file_tf=tf
@@ -315,7 +450,7 @@ def sync_ticker_github(inst_name, repo_name, tracker):
                 "platform": "GitHub",
                 "last_updated": datetime.now(timezone.utc).isoformat()
             }
-            print(f"     Status: {len(data_files)} chunks, {total_rows} total rows ({first_candle_time} -> {last_candle_time})")
+            new_tfs_processed.append((tf, len(data_files), total_rows, first_candle_time, last_candle_time))
 
     # Check if files changed in the repository
     git_status = subprocess.run(["git", "status", "--porcelain"], cwd=clone_dir, capture_output=True, text=True).stdout
@@ -323,40 +458,80 @@ def sync_ticker_github(inst_name, repo_name, tracker):
         subprocess.run(["git", "config", "user.name", "github-actions[bot]"], cwd=clone_dir)
         subprocess.run(["git", "config", "user.email", "github-actions[bot]@users.noreply.github.com"], cwd=clone_dir)
         subprocess.run(["git", "add", "-A"], cwd=clone_dir)
-        subprocess.run(["git", "commit", "-m", "Automated parquet data update"], cwd=clone_dir)
+        subprocess.run(["git", "commit", "-m", "Automated parquet data update"], cwd=clone_dir, capture_output=True)
         subprocess.run(["git", "branch", "-M", "main"], cwd=clone_dir)
-        p_res = subprocess.run(["git", "push", "-u", "origin", "main"], cwd=clone_dir, capture_output=True, text=True)
+        commit_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=clone_dir, capture_output=True, text=True).stdout.strip()
+        p_res = subprocess.run(["git", "push", "--quiet", "-u", "origin", "main"], cwd=clone_dir, capture_output=True, text=True)
         if p_res.returncode == 0:
-            print(f"     Successfully pushed updates for {repo_name} to GitHub!")
+            commit_url = f"{repo_url}/commit/{commit_hash}"
+            print(f"  [OK] [GitHub] Pushed updates to GitHub: {commit_url}")
+            summary_tracker.record_push(inst_name, "GitHub", commit_url)
+            for tf, chunks, rows, fc, lc in new_tfs_processed:
+                summary_tracker.add_record(
+                    ticker=inst_name,
+                    platform="GitHub",
+                    tf=tf,
+                    chunks=chunks,
+                    rows=rows,
+                    first_dt=fc,
+                    last_dt=lc,
+                    status="Pushed",
+                    link=commit_url
+                )
             updated_any = True
         else:
-            print(f"[!] Push failed: {p_res.stderr}")
+            print(f"  [!] GitHub push failed: {p_res.stderr.strip()[:150]}")
+            for tf, chunks, rows, fc, lc in new_tfs_processed:
+                summary_tracker.add_record(
+                    ticker=inst_name,
+                    platform="GitHub",
+                    tf=tf,
+                    chunks=chunks,
+                    rows=rows,
+                    first_dt=fc,
+                    last_dt=lc,
+                    status="Failed",
+                    link=f"{repo_url}/tree/main/{tf}"
+                )
     else:
-        print(f"     All files for {repo_name} already up-to-date on GitHub. No push needed.")
-        
-    if os.path.exists(clone_dir):
-        shutil.rmtree(clone_dir, ignore_errors=True)
-        
+        print(f"  * [GitHub] All files already up-to-date on GitHub.")
+        for tf, chunks, rows, fc, lc in new_tfs_processed:
+            summary_tracker.add_record(
+                ticker=inst_name,
+                platform="GitHub",
+                tf=tf,
+                chunks=chunks,
+                rows=rows,
+                first_dt=fc,
+                last_dt=lc,
+                status="Up-to-date",
+                link=f"{repo_url}/tree/main/{tf}"
+            )
+            
+    # Retain clone_dir temporarily so Hugging Face can reuse downloaded files if needed
     return updated_any
 
-def sync_ticker_huggingface(inst_name, repo_name, tracker):
+# -----------------------------------------------------------------------------
+# Hugging Face Sync
+# -----------------------------------------------------------------------------
+def sync_ticker_huggingface(inst_name, repo_name, tracker, summary_tracker):
     api = HfApi(token=HF_TOKEN)
     hf_user = get_hf_username()
     repo_id = f"{hf_user}/{repo_name}"
+    hf_repo_url = f"https://huggingface.co/datasets/{repo_id}"
+    summary_tracker.record_repo(inst_name, "HuggingFace", hf_repo_url)
     
     # 1. Ensure public dataset repo exists on Hugging Face
     try:
         r_info = api.repo_info(repo_id=repo_id, repo_type="dataset")
         if r_info.private:
-            print(f"     Converting Hugging Face dataset {repo_id} to public...")
             api.update_repo_settings(repo_id=repo_id, private=False, repo_type="dataset")
     except Exception:
         try:
             api.create_repo(repo_id=repo_id, repo_type="dataset", private=False)
-        except Exception as e:
-            print(f"[!] Hugging Face create_repo info: {e}")
+        except Exception:
+            pass
 
-    # Initialize separate Hugging Face tracker for this ticker
     if "HuggingFace" not in tracker[inst_name]:
         tracker[inst_name]["HuggingFace"] = {}
 
@@ -373,9 +548,6 @@ def sync_ticker_huggingface(inst_name, repo_name, tracker):
         if tf not in HUGGINGFACE_TIMEFRAMES:
             continue
             
-        print(f"  -> Timeframe {tf} (Target: HuggingFace)")
-        
-        # Check if already present on Hugging Face and up-to-date
         tf_prefix = f"{tf}/"
         tf_pods = sorted([f for f in existing_hf_files if f.startswith(tf_prefix) and f.endswith(".pod")])
         tf_data = [f for f in existing_hf_files if f.startswith(tf_prefix) and (f.endswith(".parquet") or f.endswith(".csv"))]
@@ -384,7 +556,6 @@ def sync_ticker_huggingface(inst_name, repo_name, tracker):
         if tf_pods and tf_data:
             latest_pod_file = tf_pods[-1]
             try:
-                # Download ONLY the single 1KB pod file to check freshness
                 local_pod_path = hf_hub_download(repo_id=repo_id, filename=latest_pod_file, repo_type="dataset", token=HF_TOKEN)
                 with open(local_pod_path) as pf:
                     pdata = json.load(pf)
@@ -395,17 +566,28 @@ def sync_ticker_huggingface(inst_name, repo_name, tracker):
                         last_dt = get_candle_dt(last_c)
                         now_dt = datetime.now(timezone.utc)
                         if last_dt and (now_dt - last_dt).days <= 2 and status in ["VERIFIED", "VERIFIED_PARTIAL"]:
-                            print(f"     Hugging Face {tf}: Already up-to-date ({len(tf_data)} files, last: {get_candle_time_str(last_c)}). Skipping.")
-                            existing_total = tracker.get(inst_name, {}).get("HuggingFace", {}).get(tf, {}).get("total_rows")
+                            existing_total = tracker.get(inst_name, {}).get("HuggingFace", {}).get(tf, {}).get("total_rows") or pdata.get("row_count") or pdata.get("csv_row_count", 0)
+                            print(f"  * [HuggingFace] {tf}: Up-to-date ({len(tf_data)} chunks, {existing_total:,} rows)")
                             tracker[inst_name]["HuggingFace"][tf] = {
                                 "first_candle": get_candle_time_str(first_c),
                                 "last_candle": get_candle_time_str(last_c),
-                                "total_rows": existing_total if (existing_total and existing_total > (pdata.get("row_count") or pdata.get("csv_row_count", 0))) else (pdata.get("row_count") or pdata.get("csv_row_count", 0)),
+                                "total_rows": existing_total,
                                 "chunks_count": len(tf_data),
                                 "format": "parquet" if any(f.endswith(".parquet") for f in tf_data) else "csv",
                                 "platform": "HuggingFace",
                                 "last_updated": datetime.now(timezone.utc).isoformat()
                             }
+                            summary_tracker.add_record(
+                                ticker=inst_name,
+                                platform="HuggingFace",
+                                tf=tf,
+                                chunks=len(tf_data),
+                                rows=existing_total,
+                                first_dt=get_candle_time_str(first_c),
+                                last_dt=get_candle_time_str(last_c),
+                                status="Up-to-date",
+                                link=f"{hf_repo_url}/tree/main/{tf}"
+                            )
                             skip_download = True
             except Exception:
                 pass
@@ -413,12 +595,13 @@ def sync_ticker_huggingface(inst_name, repo_name, tracker):
         if skip_download:
             continue
 
+        print(f"  * [HuggingFace] Syncing timeframe {tf}...")
         tf_dir = os.path.join(hf_base_dir, tf)
         os.makedirs(tf_dir, exist_ok=True)
         
         local_gh_dir = os.path.join(f"gh_clone_{repo_name}", tf)
         if os.path.exists(local_gh_dir) and any(f.endswith(".parquet") for f in os.listdir(local_gh_dir)):
-            print(f"     Reusing already downloaded {tf} files from GitHub clone for Hugging Face...")
+            print(f"    Reusing {tf} files from GitHub clone...")
             for f in os.listdir(local_gh_dir):
                 shutil.copy2(os.path.join(local_gh_dir, f), os.path.join(tf_dir, f))
         else:
@@ -453,32 +636,64 @@ def sync_ticker_huggingface(inst_name, repo_name, tracker):
                 except Exception:
                     pass
                     
-            print(f"     Uploading {tf} to Hugging Face {repo_id}...")
-            api.upload_folder(
-                folder_path=tf_dir,
-                repo_id=repo_id,
-                path_in_repo=tf,
-                repo_type="dataset",
-                commit_message="Automated parquet data update"
-            )
-            
-            tracker[inst_name]["HuggingFace"][tf] = {
-                "first_candle": first_candle_time,
-                "last_candle": last_candle_time,
-                "total_rows": total_rows,
-                "chunks_count": len(data_files),
-                "format": "parquet" if parquet_files else "csv",
-                "platform": "HuggingFace",
-                "last_updated": datetime.now(timezone.utc).isoformat()
-            }
-            updated_any = True
-            print(f"     Successfully uploaded {tf} for {repo_name} to Hugging Face!")
+            print(f"    Uploading {len(data_files)} file(s) for {tf} to Hugging Face...")
+            t_up = time.time()
+            try:
+                commit_info = api.upload_folder(
+                    folder_path=tf_dir,
+                    repo_id=repo_id,
+                    path_in_repo=tf,
+                    repo_type="dataset",
+                    commit_message=f"Automated {tf} parquet data update"
+                )
+                commit_oid = getattr(commit_info, 'oid', commit_info)
+                commit_url = getattr(commit_info, 'commit_url', None) or f"{hf_repo_url}/commit/{commit_oid}"
+                print(f"  [OK] [HuggingFace] Uploaded {tf} in {time.time()-t_up:.1f}s: {commit_url}")
+                summary_tracker.record_push(inst_name, "HuggingFace", commit_url)
+                
+                tracker[inst_name]["HuggingFace"][tf] = {
+                    "first_candle": first_candle_time,
+                    "last_candle": last_candle_time,
+                    "total_rows": total_rows,
+                    "chunks_count": len(data_files),
+                    "format": "parquet" if parquet_files else "csv",
+                    "platform": "HuggingFace",
+                    "last_updated": datetime.now(timezone.utc).isoformat()
+                }
+                summary_tracker.add_record(
+                    ticker=inst_name,
+                    platform="HuggingFace",
+                    tf=tf,
+                    chunks=len(data_files),
+                    rows=total_rows,
+                    first_dt=first_candle_time,
+                    last_dt=last_candle_time,
+                    status="Pushed",
+                    link=commit_url
+                )
+                updated_any = True
+            except Exception as e:
+                print(f"  [!] Hugging Face upload failed for {tf}: {e}")
+                summary_tracker.add_record(
+                    ticker=inst_name,
+                    platform="HuggingFace",
+                    tf=tf,
+                    chunks=len(data_files),
+                    rows=total_rows,
+                    first_dt=first_candle_time,
+                    last_dt=last_candle_time,
+                    status="Failed",
+                    link=f"{hf_repo_url}/tree/main/{tf}"
+                )
             
     if os.path.exists(hf_base_dir):
         shutil.rmtree(hf_base_dir, ignore_errors=True)
         
     return updated_any
 
+# -----------------------------------------------------------------------------
+# Main Loop
+# -----------------------------------------------------------------------------
 def main():
     if not GH_TOKEN or not HF_TOKEN:
         print("Missing GITHUB_TOKEN or HF_TOKEN. Make sure they are set in the environment.")
@@ -501,10 +716,13 @@ def main():
         inst_dict = {k: v for k, v in inst_dict.items() if k == ticker_filter}
         print(f"[*] Filter applied: processing only {ticker_filter}")
         
+    summary_tracker = SyncSummaryTracker()
+
     for inst_name, inst_info in inst_dict.items():
         repo_name = get_repo_name(inst_name, inst_dict)
-        print(f"\n=========================================")
-        print(f"Processing {inst_name} -> {repo_name}")
+        print(f"\n==================================================")
+        print(f"Processing: {inst_name} -> {repo_name}")
+        print(f"==================================================")
         
         if inst_name not in tracker:
             tracker[inst_name] = {"GitHub": {}, "HuggingFace": {}}
@@ -523,27 +741,30 @@ def main():
         up_hf = False
         
         if has_gh:
-            up_gh = sync_ticker_github(inst_name, repo_name, tracker)
+            up_gh = sync_ticker_github(inst_name, repo_name, tracker, summary_tracker)
         if has_hf:
-            up_hf = sync_ticker_huggingface(inst_name, repo_name, tracker)
+            up_hf = sync_ticker_huggingface(inst_name, repo_name, tracker, summary_tracker)
             
         clone_dir = f"gh_clone_{repo_name}"
         if os.path.exists(clone_dir):
             shutil.rmtree(clone_dir, ignore_errors=True)
             
         # Update tracker after processing each ticker
-        print(f"  -> Saving verified tracker metadata for {inst_name}")
         with open(tracker_file, "w") as f:
             json.dump(tracker, f, indent=2)
+        print(f"  * Tracker metadata saved for {inst_name}")
             
         if os.path.exists(".git") and (up_gh or up_hf):
-            subprocess.run(["git", "config", "user.name", "github-actions[bot]"])
-            subprocess.run(["git", "config", "user.email", "github-actions[bot]@users.noreply.github.com"])
-            subprocess.run(["git", "add", "tracker.json"])
+            subprocess.run(["git", "config", "user.name", "github-actions[bot]"], capture_output=True)
+            subprocess.run(["git", "config", "user.email", "github-actions[bot]@users.noreply.github.com"], capture_output=True)
+            subprocess.run(["git", "add", "tracker.json"], capture_output=True)
             commit_res = subprocess.run(["git", "commit", "-m", f"Update tracker for {inst_name}"], capture_output=True, text=True)
             if commit_res.returncode == 0:
-                subprocess.run(["git", "pull", "--rebase", "origin", "main"])
-                subprocess.run(["git", "push", "origin", "main"])
+                subprocess.run(["git", "pull", "--quiet", "--rebase", "origin", "main"], capture_output=True)
+                subprocess.run(["git", "push", "--quiet", "origin", "main"], capture_output=True)
+
+        # Print detailed, clean summary table for this ticker
+        summary_tracker.print_ticker_summary(inst_name, repo_name)
 
 if __name__ == "__main__":
     main()

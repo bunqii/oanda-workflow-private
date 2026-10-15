@@ -16,7 +16,16 @@
         "chunks_count": 3,
         "format": "parquet",
         "platform": "GitHub",
-        "last_updated": "2026-10-15T00:43:15.986054+00:00"
+        "last_updated": "2026-10-15T00:52:12.794098+00:00"
+      },
+      "1": {
+        "first_candle": "2006-03-19T20:29:00.000000000Z",
+        "last_candle": "2026-10-15T00:51:00.000000000Z",
+        "total_rows": 7152014,
+        "chunks_count": 248,
+        "format": "parquet",
+        "platform": "GitHub",
+        "last_updated": "2026-10-15T00:53:09.203661+00:00"
       }
     },
     "HuggingFace": {
@@ -27,7 +36,7 @@
         "chunks_count": 248,
         "format": "parquet",
         "platform": "HuggingFace",
-        "last_updated": "2026-10-14T23:05:30.609489+00:00"
+        "last_updated": "2026-10-15T01:06:43.323691+00:00"
       },
       "D": {
         "first_candle": "2020-01-01T22:00:00.000000000Z",
@@ -36,7 +45,34 @@
         "chunks_count": 3,
         "format": "parquet",
         "platform": "HuggingFace",
-        "last_updated": "2026-10-15T00:43:20.496125+00:00"
+        "last_updated": "2026-10-15T01:06:43.643381+00:00"
+      },
+      "5S": {
+        "first_candle": "2006-03-18T20:49:55.000000000Z",
+        "last_candle": "2026-10-15T00:53:30.000000000Z",
+        "total_rows": 60530673,
+        "chunks_count": 1075,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-15T01:05:19.206814+00:00"
+      },
+      "1": {
+        "first_candle": "2006-03-19T20:29:00.000000000Z",
+        "last_candle": "2026-10-15T01:04:00.000000000Z",
+        "total_rows": 7152027,
+        "chunks_count": 248,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-15T01:06:23.616298+00:00"
+      },
+      "5": {
+        "first_candle": "2006-03-19T20:25:00.000000000Z",
+        "last_candle": "2026-10-15T01:00:00.000000000Z",
+        "total_rows": 1467139,
+        "chunks_count": 248,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-15T01:06:43.100229+00:00"
       }
     }
   },

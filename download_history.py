@@ -230,8 +230,30 @@ def write_chunk_to_disk(save_dir, symbol, timeframe, c_start, c_end, buf, now_ut
         n = len(times_l)
 
     is_empty = n == 0
-    first_candle = {"Time": times_l[0],  "Open": opens_l[0],  "High": highs_l[0],  "Low": lows_l[0],  "Close": closes_l[0],  "Volume": vols_l[0]}  if n > 0 else None
-    last_candle  = {"Time": times_l[-1], "Open": opens_l[-1], "High": highs_l[-1], "Low": lows_l[-1], "Close": closes_l[-1], "Volume": vols_l[-1]} if n > 0 else None
+    unix_times = [
+        int(datetime.strptime(t[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc).timestamp())
+        if isinstance(t, str) else int(t)
+        for t in times_l
+    ]
+    first_candle = {
+        "time": unix_times[0],
+        "Time": times_l[0],
+        "open": opens_l[0],
+        "high": highs_l[0],
+        "low": lows_l[0],
+        "close": closes_l[0],
+        "volume": vols_l[0]
+    } if n > 0 else None
+
+    last_candle = {
+        "time": unix_times[-1],
+        "Time": times_l[-1],
+        "open": opens_l[-1],
+        "high": highs_l[-1],
+        "low": lows_l[-1],
+        "close": closes_l[-1],
+        "volume": vols_l[-1]
+    } if n > 0 else None
 
     if chunk_errors:
         status = "ERROR"
@@ -241,18 +263,19 @@ def write_chunk_to_disk(save_dir, symbol, timeframe, c_start, c_end, buf, now_ut
     if n > 0:
         import pandas as pd
         df = pd.DataFrame({
-            "Time": times_l,
-            "Open": opens_l,
-            "High": highs_l,
-            "Low": lows_l,
-            "Close": closes_l,
-            "Volume": vols_l
+            "time": unix_times,
+            "open": opens_l,
+            "high": highs_l,
+            "low": lows_l,
+            "close": closes_l,
+            "volume": vols_l
         })
-        df["Open"] = df["Open"].astype(float)
-        df["High"] = df["High"].astype(float)
-        df["Low"] = df["Low"].astype(float)
-        df["Close"] = df["Close"].astype(float)
-        df["Volume"] = df["Volume"].astype("int64")
+        df["time"]   = df["time"].astype("int64")
+        df["open"]   = df["open"].astype("float64")
+        df["high"]   = df["high"].astype("float64")
+        df["low"]    = df["low"].astype("float64")
+        df["close"]  = df["close"].astype("float64")
+        df["volume"] = df["volume"].astype("int64")
         df.to_parquet(parquet_file, compression="snappy", index=False)
 
     pod = {

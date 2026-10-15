@@ -118,6 +118,32 @@ def ensure_github_repo(repo_name, private=False):
         print(f"[!] Exception creating repo {repo_name}: {e}")
     return False
 
+def get_candle_dt(candle):
+    if not candle:
+        return None
+    t = candle.get("Time") or candle.get("time")
+    if t is None:
+        return None
+    if isinstance(t, (int, float)):
+        return datetime.fromtimestamp(t, tz=timezone.utc)
+    try:
+        return datetime.strptime(str(t)[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+    except Exception:
+        try:
+            return datetime.strptime(str(t)[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except Exception:
+            return None
+
+def get_candle_time_str(candle):
+    if not candle:
+        return None
+    if "Time" in candle and isinstance(candle["Time"], str):
+        return candle["Time"]
+    t = candle.get("time") or candle.get("Time")
+    if isinstance(t, (int, float)):
+        return datetime.fromtimestamp(t, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000000000Z")
+    return str(t)
+
 def get_repo_name(inst_name, inst_dict):
     display = inst_dict[inst_name].get('displayName', '').replace('/', '').replace('\\', '').replace(' ', '-')
     name_no_us = inst_name.replace("_", "")
@@ -179,14 +205,14 @@ def check_github_tf_uptodate(gh_user, repo_name, tf):
         first_candle = pod_data_first.get("first_candle") or pod_data_first.get("csv_first_candle")
         
         # Check if last candle is up to today or yesterday
-        if last_candle and "Time" in last_candle:
-            last_dt = datetime.strptime(last_candle["Time"][:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        if last_candle:
+            last_dt = get_candle_dt(last_candle)
             now_dt = datetime.now(timezone.utc)
             # If latest candle is within 2 days (weekend / market close aware), chunk is up-to-date
-            if (now_dt - last_dt).days <= 2 and status in ["VERIFIED", "VERIFIED_PARTIAL"]:
+            if last_dt and (now_dt - last_dt).days <= 2 and status in ["VERIFIED", "VERIFIED_PARTIAL"]:
                 return True, {
-                    "first_candle": first_candle.get("Time") if first_candle else None,
-                    "last_candle": last_candle.get("Time"),
+                    "first_candle": get_candle_time_str(first_candle),
+                    "last_candle": get_candle_time_str(last_candle),
                     "total_rows": pod_data_last.get("row_count") or pod_data_last.get("csv_row_count", 0),
                     "chunks_count": len(data_items),
                     "format": "parquet" if any(f['name'].endswith('.parquet') for f in data_items) else "csv"
@@ -274,9 +300,9 @@ def sync_ticker_github(inst_name, repo_name, tracker):
                         fc = pdata.get("first_candle") or pdata.get("csv_first_candle")
                         lc = pdata.get("last_candle") or pdata.get("csv_last_candle")
                         if not first_candle_time and fc:
-                            first_candle_time = fc.get("Time")
+                            first_candle_time = get_candle_time_str(fc)
                         if lc:
-                            last_candle_time = lc.get("Time")
+                            last_candle_time = get_candle_time_str(lc)
                 except Exception:
                     pass
                     
@@ -365,15 +391,15 @@ def sync_ticker_huggingface(inst_name, repo_name, tracker):
                     last_c = pdata.get("last_candle") or pdata.get("csv_last_candle")
                     first_c = pdata.get("first_candle") or pdata.get("csv_first_candle")
                     status = pdata.get("status")
-                    if last_c and "Time" in last_c:
-                        last_dt = datetime.strptime(last_c["Time"][:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                    if last_c:
+                        last_dt = get_candle_dt(last_c)
                         now_dt = datetime.now(timezone.utc)
-                        if (now_dt - last_dt).days <= 2 and status in ["VERIFIED", "VERIFIED_PARTIAL"]:
-                            print(f"     Hugging Face {tf}: Already up-to-date ({len(tf_data)} files, last: {last_c['Time']}). Skipping.")
+                        if last_dt and (now_dt - last_dt).days <= 2 and status in ["VERIFIED", "VERIFIED_PARTIAL"]:
+                            print(f"     Hugging Face {tf}: Already up-to-date ({len(tf_data)} files, last: {get_candle_time_str(last_c)}). Skipping.")
                             existing_total = tracker.get(inst_name, {}).get("HuggingFace", {}).get(tf, {}).get("total_rows")
                             tracker[inst_name]["HuggingFace"][tf] = {
-                                "first_candle": first_c.get("Time") if first_c else None,
-                                "last_candle": last_c.get("Time"),
+                                "first_candle": get_candle_time_str(first_c),
+                                "last_candle": get_candle_time_str(last_c),
                                 "total_rows": existing_total if (existing_total and existing_total > (pdata.get("row_count") or pdata.get("csv_row_count", 0))) else (pdata.get("row_count") or pdata.get("csv_row_count", 0)),
                                 "chunks_count": len(tf_data),
                                 "format": "parquet" if any(f.endswith(".parquet") for f in tf_data) else "csv",
@@ -421,9 +447,9 @@ def sync_ticker_huggingface(inst_name, repo_name, tracker):
                         fc = pdata.get("first_candle") or pdata.get("csv_first_candle")
                         lc = pdata.get("last_candle") or pdata.get("csv_last_candle")
                         if not first_candle_time and fc:
-                            first_candle_time = fc.get("Time")
+                            first_candle_time = get_candle_time_str(fc)
                         if lc:
-                            last_candle_time = lc.get("Time")
+                            last_candle_time = get_candle_time_str(lc)
                 except Exception:
                     pass
                     

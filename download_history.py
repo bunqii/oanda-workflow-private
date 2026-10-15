@@ -558,9 +558,9 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
                 elapsed_s = now_t - total_start
                 rate = blocks_done / elapsed_s if elapsed_s > 0 else 0.0
                 eta_s = (total_active_blocks - blocks_done) / rate if rate > 0 else 0.0
-                eta_str = format_time_duration(eta_s) if pending else "Done"
-                prog_line = f"    [Progress] {blocks_done:,}/{total_active_blocks:,} blocks ({pct:.1f}%) | {chunks_written}/{len(unverified_chunks)} chunks written | {rate:.1f} blk/s | ETA: {eta_str}"
-                print(f"\r{prog_line}".ljust(110), end="", flush=True)
+                prog_line = f"  [Progress] {blocks_done:,}/{total_active_blocks:,} ({pct:.1f}%) | Chunks: {chunks_written}/{len(unverified_chunks)} | {rate:.1f} blk/s | ETA: {eta_str}"
+                sys.stdout.write(f"\r{prog_line.ljust(79)[:79]}")
+                sys.stdout.flush()
                 last_progress_time = now_t
 
             if failed_retry:

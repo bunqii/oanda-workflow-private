@@ -29,7 +29,7 @@ except Exception:
     pass
 
 import gc
-from huggingface_hub import HfApi, hf_hub_download
+from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 from download_history import bulk_download_and_split, cleanup_memory, OANDA_URL, HEADERS, env_vars
 
 GH_TOKEN = os.environ.get("GITHUB_TOKEN") or os.environ.get("PAT_TOKEN") or env_vars.get("PAT_TOKEN") or env_vars.get("GITHUB_TOKEN")
@@ -272,8 +272,10 @@ class SyncSummaryTracker:
         if status == "Up-to-date":
             timing_line = f"Verified remote in {format_duration(dl_time_s)} | Status: Up-to-date (no upload needed)" if dl_time_s else "Verified remote | Status: Up-to-date (no upload needed)"
         elif is_reused:
+            other_plat = "Hugging Face" if platform == "GitHub" else "GitHub"
+            push_word = "Push" if platform == "GitHub" else "Upload"
             tot = (dl_time_s or 0.0) + (push_time_s or 0.0)
-            timing_line = f"Download: Reused from GitHub ({format_duration(dl_time_s)}) | Upload: {format_duration(push_time_s)} | Total: {format_duration(tot)}"
+            timing_line = f"Download: Reused from {other_plat} ({format_duration(dl_time_s)}) | {push_word}: {format_duration(push_time_s)} | Total: {format_duration(tot)}"
         else:
             tot = (dl_time_s or 0.0) + (push_time_s or 0.0)
             dl_part = f"Download: {format_duration(dl_time_s)}" if dl_time_s is not None else "Download: -"
@@ -502,10 +504,48 @@ def sync_ticker_github(inst_name, repo_name, tracker, summary_tracker):
         chunk_size = get_chunk_size(tf)
         
         t_dl_start = time.time()
-        bulk_download_and_split(
-            inst_name, oanda_tf, None, None, chunk_size, tf_dir,
-            file_prefix=repo_name, file_tf=tf
-        )
+        is_reused = False
+        
+        # 1. Check if Hugging Face staging directory already has this timeframe locally
+        local_hf_dir = os.path.join("tmp_hf", repo_name, tf)
+        if os.path.exists(local_hf_dir) and any(f.endswith(".parquet") for f in os.listdir(local_hf_dir)):
+            parquet_count = len([f for f in os.listdir(local_hf_dir) if f.endswith(".parquet")])
+            print(f"    Reusing {tf} files from Hugging Face local staging ({parquet_count} chunks)...")
+            for f in os.listdir(local_hf_dir):
+                shutil.copy2(os.path.join(local_hf_dir, f), os.path.join(tf_dir, f))
+            is_reused = True
+            
+        # 2. Check if Hugging Face remote dataset has this timeframe
+        if not is_reused:
+            hf_user = get_hf_username()
+            hf_repo_id = f"{hf_user}/{repo_name}"
+            hf_meta = tracker.get(inst_name, {}).get("HuggingFace", {}).get(tf)
+            if hf_meta and hf_meta.get("chunks_count", 0) > 0:
+                print(f"    Fetching {repo_name} from Hugging Face ({tf}) to reuse files...")
+                try:
+                    hf_cache_dir = snapshot_download(
+                        repo_id=hf_repo_id,
+                        repo_type="dataset",
+                        allow_patterns=f"{tf}/*",
+                        token=HF_TOKEN,
+                        max_workers=16
+                    )
+                    hf_tf_dir = os.path.join(hf_cache_dir, tf)
+                    if os.path.exists(hf_tf_dir) and any(f.endswith(".parquet") for f in os.listdir(hf_tf_dir)):
+                        parquet_count = len([f for f in os.listdir(hf_tf_dir) if f.endswith(".parquet")])
+                        print(f"    Reusing {tf} files from Hugging Face ({parquet_count} chunks)...")
+                        for f in os.listdir(hf_tf_dir):
+                            shutil.copy2(os.path.join(hf_tf_dir, f), os.path.join(tf_dir, f))
+                        is_reused = True
+                except Exception:
+                    pass
+                    
+        # 3. Fallback: download from OANDA API if not available on Hugging Face
+        if not is_reused:
+            bulk_download_and_split(
+                inst_name, oanda_tf, None, None, chunk_size, tf_dir,
+                file_prefix=repo_name, file_tf=tf
+            )
         dl_time_s = time.time() - t_dl_start
         
         pod_files = sorted([f for f in os.listdir(tf_dir) if f.endswith(".pod")])
@@ -541,6 +581,9 @@ def sync_ticker_github(inst_name, repo_name, tracker, summary_tracker):
                 "platform": "GitHub",
                 "last_updated": datetime.now(timezone.utc).isoformat()
             }
+            if is_reused and inst_name in tracker and "HuggingFace" in tracker[inst_name] and tf in tracker[inst_name]["HuggingFace"]:
+                if tracker[inst_name]["HuggingFace"][tf].get("total_rows", 0) < total_rows:
+                    tracker[inst_name]["HuggingFace"][tf]["total_rows"] = total_rows
 
         # Check if files changed for this timeframe
         git_status = subprocess.run(["git", "status", "--porcelain"], cwd=clone_dir, capture_output=True, text=True).stdout
@@ -588,7 +631,8 @@ def sync_ticker_github(inst_name, repo_name, tracker, summary_tracker):
             status=status_str,
             link=commit_url,
             dl_time_s=dl_time_s,
-            push_time_s=push_time_s
+            push_time_s=push_time_s,
+            is_reused=is_reused
         )
         summary_tracker.print_timeframe_summary(
             ticker=inst_name,
@@ -601,7 +645,8 @@ def sync_ticker_github(inst_name, repo_name, tracker, summary_tracker):
             status=status_str,
             link=commit_url,
             dl_time_s=dl_time_s,
-            push_time_s=push_time_s
+            push_time_s=push_time_s,
+            is_reused=is_reused
         )
 
     # Retain clone_dir temporarily so Hugging Face can reuse downloaded files if needed

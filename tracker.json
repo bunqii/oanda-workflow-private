@@ -1455,5 +1455,74 @@
         "last_updated": "2026-10-15T21:11:27.723556+00:00"
       }
     }
+  },
+  "ETH_USD": {
+    "GitHub": {
+      "1": {
+        "first_candle": "2020-01-02T05:01:00.000000000Z",
+        "last_candle": "2026-10-15T21:10:00.000000000Z",
+        "total_rows": 2462076,
+        "chunks_count": 82,
+        "format": "parquet",
+        "platform": "GitHub",
+        "last_updated": "2026-10-15T21:11:56.389586+00:00"
+      },
+      "D": {
+        "first_candle": "2020-01-02T22:00:00.000000000Z",
+        "last_candle": "2026-10-14T21:00:00.000000000Z",
+        "total_rows": 1862,
+        "chunks_count": 1,
+        "format": "parquet",
+        "platform": "GitHub",
+        "last_updated": "2026-10-15T21:11:57.248086+00:00"
+      }
+    },
+    "HuggingFace": {
+      "5S": {
+        "first_candle": "2020-01-02T05:00:05.000000000Z",
+        "last_candle": "2026-10-15T21:12:00.000000000Z",
+        "total_rows": 27663213,
+        "chunks_count": 355,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-15T21:17:16.588660+00:00"
+      },
+      "1": {
+        "first_candle": "2020-01-02T05:01:00.000000000Z",
+        "last_candle": "2026-10-15T21:10:00.000000000Z",
+        "total_rows": 2462076,
+        "chunks_count": 82,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-15T21:17:20.265497+00:00"
+      },
+      "5": {
+        "first_candle": "2020-01-02T05:05:00.000000000Z",
+        "last_candle": "2026-10-15T21:10:00.000000000Z",
+        "total_rows": 493773,
+        "chunks_count": 82,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-15T21:17:28.841651+00:00"
+      },
+      "60": {
+        "first_candle": "2020-01-02T06:00:00.000000000Z",
+        "last_candle": "2026-10-15T20:00:00.000000000Z",
+        "total_rows": 41253,
+        "chunks_count": 82,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-15T21:17:32.863261+00:00"
+      },
+      "D": {
+        "first_candle": "2020-01-02T22:00:00.000000000Z",
+        "last_candle": "2026-10-14T21:00:00.000000000Z",
+        "total_rows": 1862,
+        "chunks_count": 1,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-15T21:17:33.592516+00:00"
+      }
+    }
   }
 }

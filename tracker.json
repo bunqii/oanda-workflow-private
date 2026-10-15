@@ -765,5 +765,74 @@
         "last_updated": "2026-10-15T09:35:46.781658+00:00"
       }
     }
+  },
+  "EUR_PLN": {
+    "GitHub": {
+      "1": {
+        "first_candle": "2002-05-06T20:59:00.000000000Z",
+        "last_candle": "2026-10-15T09:34:00.000000000Z",
+        "total_rows": 6994245,
+        "chunks_count": 294,
+        "format": "parquet",
+        "platform": "GitHub",
+        "last_updated": "2026-10-15T09:38:53.922831+00:00"
+      },
+      "D": {
+        "first_candle": "2002-05-06T21:00:00.000000000Z",
+        "last_candle": "2026-10-13T21:00:00.000000000Z",
+        "total_rows": 7045,
+        "chunks_count": 3,
+        "format": "parquet",
+        "platform": "GitHub",
+        "last_updated": "2026-10-15T09:38:55.002185+00:00"
+      }
+    },
+    "HuggingFace": {
+      "5S": {
+        "first_candle": "2002-05-06T20:59:55.000000000Z",
+        "last_candle": "2026-10-15T09:39:05.000000000Z",
+        "total_rows": 43849780,
+        "chunks_count": 1276,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-15T10:03:36.174570+00:00"
+      },
+      "1": {
+        "first_candle": "2002-05-06T20:59:00.000000000Z",
+        "last_candle": "2026-10-15T10:02:00.000000000Z",
+        "total_rows": 6994273,
+        "chunks_count": 294,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-15T10:06:54.965392+00:00"
+      },
+      "5": {
+        "first_candle": "2002-05-06T20:55:00.000000000Z",
+        "last_candle": "2026-10-15T10:00:00.000000000Z",
+        "total_rows": 1541821,
+        "chunks_count": 294,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-15T10:07:44.646379+00:00"
+      },
+      "60": {
+        "first_candle": "2002-05-06T20:00:00.000000000Z",
+        "last_candle": "2026-10-15T09:00:00.000000000Z",
+        "total_rows": 137389,
+        "chunks_count": 294,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-15T10:07:56.436497+00:00"
+      },
+      "D": {
+        "first_candle": "2002-05-06T21:00:00.000000000Z",
+        "last_candle": "2026-10-13T21:00:00.000000000Z",
+        "total_rows": 7045,
+        "chunks_count": 3,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-15T10:07:58.644030+00:00"
+      }
+    }
   }
 }

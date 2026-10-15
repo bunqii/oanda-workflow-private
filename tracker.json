@@ -1810,7 +1810,7 @@
         "chunks_count": 237,
         "format": "parquet",
         "platform": "GitHub",
-        "last_updated": "2026-10-15T22:51:32.712869+00:00"
+        "last_updated": "2026-10-15T22:54:45.119959+00:00"
       },
       "D": {
         "first_candle": "2007-02-12T22:00:00.000000000Z",
@@ -1819,27 +1819,27 @@
         "chunks_count": 3,
         "format": "parquet",
         "platform": "GitHub",
-        "last_updated": "2026-10-15T22:51:33.271044+00:00"
+        "last_updated": "2026-10-15T22:54:45.783539+00:00"
       }
     },
     "HuggingFace": {
       "5": {
         "first_candle": "2007-02-11T23:40:00.000000000Z",
-        "last_candle": "2011-07-31T23:55:00.000000000Z",
-        "total_rows": 328699,
-        "chunks_count": 54,
+        "last_candle": "2026-10-15T15:00:00.000000000Z",
+        "total_rows": 1412676,
+        "chunks_count": 237,
         "format": "parquet",
         "platform": "HuggingFace",
-        "last_updated": "2026-10-15T22:51:43.236515+00:00"
+        "last_updated": "2026-10-15T22:56:24.626850+00:00"
       },
       "60": {
         "first_candle": "2007-02-12T00:00:00.000000000Z",
-        "last_candle": "2009-12-31T22:00:00.000000000Z",
-        "total_rows": 18184,
-        "chunks_count": 48,
+        "last_candle": "2026-10-15T15:00:00.000000000Z",
+        "total_rows": 119581,
+        "chunks_count": 237,
         "format": "parquet",
         "platform": "HuggingFace",
-        "last_updated": "2026-10-15T22:51:50.189423+00:00"
+        "last_updated": "2026-10-15T22:56:33.613467+00:00"
       },
       "D": {
         "first_candle": "2007-02-12T22:00:00.000000000Z",
@@ -1848,7 +1848,16 @@
         "chunks_count": 3,
         "format": "parquet",
         "platform": "HuggingFace",
-        "last_updated": "2026-10-15T22:51:50.464035+00:00"
+        "last_updated": "2026-10-15T22:56:33.779994+00:00"
+      },
+      "1": {
+        "first_candle": "2007-02-11T23:39:00.000000000Z",
+        "last_candle": "2026-10-15T15:00:00.000000000Z",
+        "total_rows": 6899420,
+        "chunks_count": 237,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-15T22:56:01.265778+00:00"
       }
     }
   },

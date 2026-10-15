@@ -438,7 +438,9 @@ def sync_ticker_github(inst_name, repo_name, tracker, summary_tracker):
         is_up, pod_meta = check_github_tf_uptodate(gh_user, repo_name, tf)
         check_duration = time.time() - t_check_start
         if is_up and pod_meta:
-            existing_total = tracker.get(inst_name, {}).get("GitHub", {}).get(tf, {}).get("total_rows") or pod_meta.get("total_rows", 0)
+            existing_total = tracker.get(inst_name, {}).get("GitHub", {}).get(tf, {}).get("total_rows") or tracker.get(inst_name, {}).get("HuggingFace", {}).get(tf, {}).get("total_rows") or 0
+            if existing_total < pod_meta.get("total_rows", 0):
+                existing_total = pod_meta.get("total_rows", 0)
             print(f"  * [GitHub] {tf}: Up-to-date ({pod_meta['chunks_count']} chunks, {existing_total:,} rows)")
             tracker[inst_name]["GitHub"][tf] = {
                 **pod_meta,
@@ -662,7 +664,7 @@ def sync_ticker_huggingface(inst_name, repo_name, tracker, summary_tracker):
                         last_dt = get_candle_dt(last_c)
                         now_dt = datetime.now(timezone.utc)
                         if last_dt and (now_dt - last_dt).days <= 2 and status in ["VERIFIED", "VERIFIED_PARTIAL"]:
-                            existing_total = tracker.get(inst_name, {}).get("HuggingFace", {}).get(tf, {}).get("total_rows") or pdata.get("row_count") or pdata.get("csv_row_count", 0)
+                            existing_total = tracker.get(inst_name, {}).get("HuggingFace", {}).get(tf, {}).get("total_rows") or tracker.get(inst_name, {}).get("GitHub", {}).get(tf, {}).get("total_rows") or pdata.get("row_count") or pdata.get("csv_row_count", 0)
                             existing_first = tracker.get(inst_name, {}).get("HuggingFace", {}).get(tf, {}).get("first_candle")
                             if not existing_first and first_pod_file != latest_pod_file:
                                 try:
@@ -726,9 +728,20 @@ def sync_ticker_huggingface(inst_name, repo_name, tracker, summary_tracker):
         
         t_dl_start = time.time()
         is_reused = False
-        local_gh_dir = os.path.join(f"gh_clone_{repo_name}", tf)
-        if os.path.exists(local_gh_dir) and any(f.endswith(".parquet") for f in os.listdir(local_gh_dir)):
-            print(f"    Reusing {tf} files from GitHub clone...")
+        clone_dir = f"gh_clone_{repo_name}"
+        local_gh_dir = os.path.join(clone_dir, tf)
+        
+        has_gh_files = os.path.exists(local_gh_dir) and any(f.endswith(".parquet") for f in os.listdir(local_gh_dir))
+        if not has_gh_files and (tf in GITHUB_TIMEFRAMES or bool(tracker.get(inst_name, {}).get("GitHub", {}).get(tf))):
+            gh_user = get_gh_username()
+            if not os.path.exists(clone_dir):
+                print(f"    Fetching {repo_name} from GitHub ({tf}) to reuse files...")
+                run_cmd(f"git clone --quiet --depth 1 https://x-access-token:{GH_TOKEN}@github.com/{gh_user}/{repo_name}.git {clone_dir}")
+            has_gh_files = os.path.exists(local_gh_dir) and any(f.endswith(".parquet") for f in os.listdir(local_gh_dir))
+
+        if has_gh_files:
+            parquet_count = len([f for f in os.listdir(local_gh_dir) if f.endswith(".parquet")])
+            print(f"    Reusing {tf} files from GitHub clone ({parquet_count} chunks)...")
             for f in os.listdir(local_gh_dir):
                 shutil.copy2(os.path.join(local_gh_dir, f), os.path.join(tf_dir, f))
             is_reused = True
@@ -790,6 +803,9 @@ def sync_ticker_huggingface(inst_name, repo_name, tracker, summary_tracker):
                     "platform": "HuggingFace",
                     "last_updated": datetime.now(timezone.utc).isoformat()
                 }
+                if is_reused and inst_name in tracker and "GitHub" in tracker[inst_name] and tf in tracker[inst_name]["GitHub"]:
+                    if tracker[inst_name]["GitHub"][tf].get("total_rows", 0) < total_rows:
+                        tracker[inst_name]["GitHub"][tf]["total_rows"] = total_rows
                 summary_tracker.add_record(
                     ticker=inst_name,
                     platform="HuggingFace",

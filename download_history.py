@@ -25,7 +25,7 @@ CHUNK_SIZE = "month"
 TIMEFRAME  = "M1"
 
 INSTRUMENT = "BTC_USD"
-BATCH_SIZE = 120
+BATCH_SIZE = 100
 STAGGER_MS = 1
 
 # Optional: Set specific start and end dates (format: "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DD").
@@ -72,6 +72,18 @@ TIMEFRAME_MINUTES = {
     "H1": 60, "H2": 120, "H3": 180, "H4": 240, "H6": 360, "H8": 480, "H12": 720,
     "D": 1440, "W": 10080, "M": 43200
 }
+
+def format_time_duration(seconds):
+    if seconds is None or seconds < 0:
+        return "0s"
+    m, s = divmod(int(seconds), 60)
+    h, m = divmod(m, 60)
+    if h > 0:
+        return f"{h}h {m:02d}m {s:02d}s"
+    elif m > 0:
+        return f"{m}m {s:02d}s"
+    else:
+        return f"{s}s"
 
 # -----------------------------------------------------------------------------
 # Calendar helpers
@@ -328,10 +340,12 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
     os.makedirs(save_dir, exist_ok=True)
     now_utc = datetime.now(timezone.utc)
 
+    limits = httpx.Limits(max_connections=200, max_keepalive_connections=100, keepalive_expiry=30.0)
+    timeout = httpx.Timeout(30.0, connect=10.0)
     try:
-        client_ctx = httpx.AsyncClient(http2=True, headers=HEADERS)
+        client_ctx = httpx.AsyncClient(http2=True, headers=HEADERS, limits=limits, timeout=timeout)
     except Exception:
-        client_ctx = httpx.AsyncClient(headers=HEADERS)
+        client_ctx = httpx.AsyncClient(headers=HEADERS, limits=limits, timeout=timeout)
 
     async with client_ctx as client:
         # Start date handling
@@ -360,7 +374,7 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
 
         if is_standalone:
             print("==================================================")
-            print(f"OANDA Fast Downloader — Streaming Hybrid v3.5 ({symbol})")
+            print(f"OANDA Fast Downloader - Streaming Hybrid v3.5 ({symbol})")
             print("==================================================")
             print(f"Target Range (IST): {s_local} to {e_local}")
         else:
@@ -446,10 +460,10 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
                     block_serves[b_idx].append(c_idx)
                     chunk_needs[c_idx].add(b_idx)
 
-        # Blocks that serve NO unverified chunks → skip entirely
+        # Blocks that serve NO unverified chunks -> skip entirely
         skippable = {b_idx for b_idx in range(len(api_blocks)) if not block_serves[b_idx]}
-        if skippable and is_standalone:
-            print(f"-> Skipping {len(skippable)} blocks (already verified ranges)")
+        if skippable:
+            print(f"    Skipping {len(skippable)} blocks (already verified ranges)")
 
         # 4. Per-chunk accumulators
         chunk_buffers: dict[int, dict] = {
@@ -468,7 +482,9 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
 
         pending = [(b_idx, b_start, b_end) for b_idx, (b_start, b_end) in enumerate(api_blocks)
                    if b_idx not in skippable]
-        
+        total_active_blocks = len(pending)
+        last_progress_time = 0.0
+
         block_attempts = defaultdict(int)
         loop_iteration = 1
 
@@ -476,8 +492,6 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
             batch          = pending[:BATCH_SIZE]
             pending        = pending[BATCH_SIZE:]
 
-            if is_standalone:
-                print(f"  [Loop {loop_iteration}] Batch of {len(batch)} blocks...")
             # Note: pass symbol & timeframe instead of globals
             tasks   = [fetch_block(client, symbol, timeframe, b_start, b_end, b_idx) for b_idx, b_start, b_end in batch]
             results = await asyncio.gather(*tasks)
@@ -544,11 +558,23 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
                             chunks_written += 1
 
             pending = failed_retry + pending
+            blocks_done = total_active_blocks - len(pending)
+
+            now_t = time.time()
+            if total_active_blocks > 0 and (now_t - last_progress_time >= 4.0 or not pending):
+                pct = (blocks_done / total_active_blocks) * 100.0
+                elapsed_s = now_t - total_start
+                rate = blocks_done / elapsed_s if elapsed_s > 0 else 0.0
+                eta_s = (total_active_blocks - blocks_done) / rate if rate > 0 else 0.0
+                eta_str = format_time_duration(eta_s) if pending else "Done"
+                print(f"    [Progress] {blocks_done:,}/{total_active_blocks:,} blocks ({pct:.1f}%) | {chunks_written}/{len(unverified_chunks)} chunks written | {rate:.1f} blk/s | ETA: {eta_str}")
+                last_progress_time = now_t
+
             if failed_retry:
                 max_attempts = max(block_attempts[b[0]] for b in failed_retry)
                 sleep_time = min(60, 2 ** min(max_attempts, 6))
                 codes = {all_block_outcomes[b[0]]["code"] for b in failed_retry if b[0] in all_block_outcomes}
-                print(f"    [Retry] {len(failed_retry)} block(s) (codes: {list(codes)}) waiting {sleep_time}s (attempt {max_attempts}/50)...")
+                print(f"    [Retry] {len(failed_retry)} block(s) (codes: {sorted(list(codes), key=lambda x: str(x))}) waiting {sleep_time}s (attempt {max_attempts}/50)...")
                 await asyncio.sleep(sleep_time)
                 loop_iteration += 1
 

@@ -231,78 +231,56 @@ def write_chunk_to_disk(save_dir, symbol, timeframe, c_start, c_end, buf, now_ut
         buf["times"], buf["opens"], buf["highs"], buf["lows"], buf["closes"], buf["vols"])
 
     n = len(times_l)
-    if n > 0:
-        # Sort + dedup
-        idx = sorted(range(n), key=lambda i: times_l[i])
-        times_l  = [times_l[i]  for i in idx]
-        opens_l  = [opens_l[i]  for i in idx]
-        highs_l  = [highs_l[i]  for i in idx]
-        lows_l   = [lows_l[i]   for i in idx]
-        closes_l = [closes_l[i] for i in idx]
-        vols_l   = [vols_l[i]   for i in idx]
-        # Dedup
-        seen = set(); keep = []
-        for i, t in enumerate(times_l):
-            if t not in seen:
-                seen.add(t); keep.append(i)
-        if len(keep) < n:
-            times_l  = [times_l[i]  for i in keep]
-            opens_l  = [opens_l[i]  for i in keep]
-            highs_l  = [highs_l[i]  for i in keep]
-            lows_l   = [lows_l[i]   for i in keep]
-            closes_l = [closes_l[i] for i in keep]
-            vols_l   = [vols_l[i]   for i in keep]
-        n = len(times_l)
-
-    is_empty = n == 0
-    unix_times = [
-        int(datetime.strptime(t[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc).timestamp())
-        if isinstance(t, str) else int(t)
-        for t in times_l
-    ]
-    first_candle = {
-        "time": unix_times[0],
-        "Time": times_l[0],
-        "open": opens_l[0],
-        "high": highs_l[0],
-        "low": lows_l[0],
-        "close": closes_l[0],
-        "volume": vols_l[0]
-    } if n > 0 else None
-
-    last_candle = {
-        "time": unix_times[-1],
-        "Time": times_l[-1],
-        "open": opens_l[-1],
-        "high": highs_l[-1],
-        "low": lows_l[-1],
-        "close": closes_l[-1],
-        "volume": vols_l[-1]
-    } if n > 0 else None
-
-    if chunk_errors:
-        status = "ERROR"
-    else:
-        status = "VERIFIED_PARTIAL" if c_end > now_utc else ("EMPTY" if is_empty else "VERIFIED")
-
     import pandas as pd
+
     if n > 0:
         df = pd.DataFrame({
-            "time": unix_times,
+            "time_str": times_l,
             "open": opens_l,
             "high": highs_l,
             "low": lows_l,
             "close": closes_l,
             "volume": vols_l
         })
-        df["time"]   = df["time"].astype("int64")
-        df["open"]   = df["open"].astype("float64")
-        df["high"]   = df["high"].astype("float64")
-        df["low"]    = df["low"].astype("float64")
-        df["close"]  = df["close"].astype("float64")
+        df.drop_duplicates(subset=["time_str"], inplace=True)
+        df.sort_values("time_str", inplace=True)
+
+        # Fast vectorized Unix timestamp conversion without Python strptime
+        df["time"] = (pd.to_datetime(df["time_str"]).astype("int64") // 10**9).astype("int64")
+        df["open"] = df["open"].astype("float64")
+        df["high"] = df["high"].astype("float64")
+        df["low"] = df["low"].astype("float64")
+        df["close"] = df["close"].astype("float64")
         df["volume"] = df["volume"].astype("int64")
-        df.to_parquet(parquet_file, compression="snappy", index=False)
+
+        n = len(df)
+        first_row = df.iloc[0]
+        last_row = df.iloc[-1]
+
+        first_candle = {
+            "time": int(first_row["time"]),
+            "Time": str(first_row["time_str"]),
+            "open": float(first_row["open"]),
+            "high": float(first_row["high"]),
+            "low": float(first_row["low"]),
+            "close": float(first_row["close"]),
+            "volume": int(first_row["volume"])
+        }
+        last_candle = {
+            "time": int(last_row["time"]),
+            "Time": str(last_row["time_str"]),
+            "open": float(last_row["open"]),
+            "high": float(last_row["high"]),
+            "low": float(last_row["low"]),
+            "close": float(last_row["close"]),
+            "volume": int(last_row["volume"])
+        }
+
+        out_df = df[["time", "open", "high", "low", "close", "volume"]]
+        out_df.to_parquet(parquet_file, compression="snappy", index=False)
     else:
+        first_candle = None
+        last_candle = None
         df = pd.DataFrame({
             "time": pd.Series(dtype="int64"),
             "open": pd.Series(dtype="float64"),
@@ -312,6 +290,12 @@ def write_chunk_to_disk(save_dir, symbol, timeframe, c_start, c_end, buf, now_ut
             "volume": pd.Series(dtype="int64")
         })
         df.to_parquet(parquet_file, compression="snappy", index=False)
+
+    is_empty = (n == 0)
+    if chunk_errors:
+        status = "ERROR"
+    else:
+        status = "VERIFIED_PARTIAL" if c_end > now_utc else ("EMPTY" if is_empty else "VERIFIED")
 
     pod = {
         "pod_version": "4.0",

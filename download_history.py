@@ -179,13 +179,21 @@ async def fetch_block(client, symbol, timeframe, start_dt, end_dt, block_idx):
     try:
         r = await client.get(url, params=params, headers=HEADERS, timeout=30.0)
         if r.status_code == 200:
-            return {"block_idx": block_idx, "ok": True, "candles": r.json().get('candles', []), "outcome": {"block_idx": block_idx, "code": 200, "msg": "OK", "params": params}}
-        elif r.status_code == 429:
-            return {"block_idx": block_idx, "ok": False, "retry": True, "outcome": {"block_idx": block_idx, "code": 429, "msg": "Rate Limit", "params": params}}
+            try:
+                candles = r.json().get('candles', [])
+                return {"block_idx": block_idx, "ok": True, "candles": candles, "outcome": {"block_idx": block_idx, "code": 200, "msg": "OK", "params": params}}
+            except Exception as json_err:
+                return {"block_idx": block_idx, "ok": False, "retry": True, "outcome": {"block_idx": block_idx, "code": -2, "msg": f"JSON decode error: {json_err}", "params": params}}
+        elif r.status_code in (429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 408):
+            # Transient server / proxy / Cloudflare / rate-limit errors -> always retry
+            return {"block_idx": block_idx, "ok": False, "retry": True, "outcome": {"block_idx": block_idx, "code": r.status_code, "msg": f"Transient HTTP {r.status_code}", "params": params}}
+        elif r.status_code in (401, 403):
+            # Transient session / connection renegotiation drops
+            return {"block_idx": block_idx, "ok": False, "retry": True, "outcome": {"block_idx": block_idx, "code": r.status_code, "msg": f"Auth renegotiation ({r.status_code})", "params": params}}
         else:
             return {"block_idx": block_idx, "ok": False, "retry": False, "outcome": {"block_idx": block_idx, "code": r.status_code, "msg": r.text[:100], "params": params}}
     except Exception as e:
-        return {"block_idx": block_idx, "ok": False, "retry": True, "outcome": {"block_idx": block_idx, "code": -1, "msg": str(e), "params": params}}
+        return {"block_idx": block_idx, "ok": False, "retry": True, "outcome": {"block_idx": block_idx, "code": -1, "msg": str(e)[:100], "params": params}}
 
 # -----------------------------------------------------------------------------
 # Chunk writer
@@ -260,8 +268,8 @@ def write_chunk_to_disk(save_dir, symbol, timeframe, c_start, c_end, buf, now_ut
     else:
         status = "VERIFIED_PARTIAL" if c_end > now_utc else ("EMPTY" if is_empty else "VERIFIED")
 
+    import pandas as pd
     if n > 0:
-        import pandas as pd
         df = pd.DataFrame({
             "time": unix_times,
             "open": opens_l,
@@ -276,6 +284,16 @@ def write_chunk_to_disk(save_dir, symbol, timeframe, c_start, c_end, buf, now_ut
         df["low"]    = df["low"].astype("float64")
         df["close"]  = df["close"].astype("float64")
         df["volume"] = df["volume"].astype("int64")
+        df.to_parquet(parquet_file, compression="snappy", index=False)
+    else:
+        df = pd.DataFrame({
+            "time": pd.Series(dtype="int64"),
+            "open": pd.Series(dtype="float64"),
+            "high": pd.Series(dtype="float64"),
+            "low": pd.Series(dtype="float64"),
+            "close": pd.Series(dtype="float64"),
+            "volume": pd.Series(dtype="int64")
+        })
         df.to_parquet(parquet_file, compression="snappy", index=False)
 
     pod = {
@@ -487,17 +505,17 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
                 else:
                     if r.get("retry"):
                         block_attempts[b_idx] += 1
-                        if block_attempts[b_idx] > 30:
-                            print(f"    -> Block {b_idx} PERMANENT FAIL (Exceeded 30 retries): {outcome['code']} {outcome['msg']}")
+                        if block_attempts[b_idx] > 50:
+                            print(f"    [!] Block {b_idx} failed after 50 retries: {outcome['code']} {outcome['msg']}")
                             permanent_failures.append(outcome)
                         else:
                             failed_retry.append((b_idx, *api_blocks[b_idx]))
                     else:
-                        print(f"    -> Block {b_idx} PERMANENT FAIL: {outcome['code']} {outcome['msg']}")
+                        print(f"    [!] Block {b_idx} non-retryable error: {outcome['code']} {outcome['msg']}")
                         permanent_failures.append(outcome)
 
                 # Process chunk completion only if the block is fully resolved (success or permanent failure)
-                if r["ok"] or not r.get("retry") or block_attempts[b_idx] > 30:
+                if r["ok"] or not r.get("retry") or block_attempts[b_idx] > 50:
                     for c_idx in block_serves[b_idx]:
                         chunk_pending[c_idx].discard(b_idx)
                         if not chunk_pending[c_idx] and c_idx in chunk_buffers:
@@ -528,9 +546,9 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
             pending = failed_retry + pending
             if failed_retry:
                 max_attempts = max(block_attempts[b[0]] for b in failed_retry)
-                # Gradual backoff: 2s, 4s, 8s, 16s, 32s, capped at 60s
-                sleep_time = min(60, 2 ** max_attempts)
-                print(f"    -> {len(failed_retry)} retrying in {sleep_time}s...")
+                sleep_time = min(60, 2 ** min(max_attempts, 6))
+                codes = {all_block_outcomes[b[0]]["code"] for b in failed_retry if b[0] in all_block_outcomes}
+                print(f"    [Retry] {len(failed_retry)} block(s) (codes: {list(codes)}) waiting {sleep_time}s (attempt {max_attempts}/50)...")
                 await asyncio.sleep(sleep_time)
                 loop_iteration += 1
 
@@ -566,6 +584,12 @@ def bulk_download_and_split(symbol, timeframe, start_dt, end_dt, chunk_size, sav
     thread = threading.Thread(target=run_in_thread, daemon=True)
     thread.start()
     thread.join()
+
+def cleanup_memory():
+    global _market_state_cache
+    _market_state_cache.clear()
+    import gc
+    gc.collect()
 
 if __name__ == "__main__":
     start_dt = None

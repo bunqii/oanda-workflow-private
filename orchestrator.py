@@ -28,8 +28,9 @@ try:
 except Exception:
     pass
 
+import gc
 from huggingface_hub import HfApi, hf_hub_download
-from download_history import bulk_download_and_split, OANDA_URL, HEADERS, env_vars
+from download_history import bulk_download_and_split, cleanup_memory, OANDA_URL, HEADERS, env_vars
 
 GH_TOKEN = os.environ.get("GITHUB_TOKEN") or os.environ.get("PAT_TOKEN") or env_vars.get("PAT_TOKEN") or env_vars.get("GITHUB_TOKEN")
 HF_TOKEN = os.environ.get("HF_TOKEN") or env_vars.get("HF_TOKEN")
@@ -694,6 +695,46 @@ def sync_ticker_huggingface(inst_name, repo_name, tracker, summary_tracker):
 # -----------------------------------------------------------------------------
 # Main Loop
 # -----------------------------------------------------------------------------
+def cleanup_ticker_resources(repo_name, hf_user):
+    """
+    Frees disk storage and RAM immediately after a ticker is processed:
+    1. Deletes the local git clone directory for this ticker.
+    2. Deletes the Hugging Face staging folder for this ticker.
+    3. Cleans up cached hub snapshots in ~/.cache/huggingface/hub for this ticker.
+    4. Clears in-memory market caches and runs garbage collection.
+    """
+    # 1. Clean GitHub clone directory
+    clone_dir = f"gh_clone_{repo_name}"
+    if os.path.exists(clone_dir):
+        shutil.rmtree(clone_dir, ignore_errors=True)
+
+    # 2. Clean HF staging directory
+    hf_base_dir = os.path.join("tmp_hf", repo_name)
+    if os.path.exists(hf_base_dir):
+        shutil.rmtree(hf_base_dir, ignore_errors=True)
+    if os.path.exists("tmp_hf"):
+        try:
+            if not os.listdir("tmp_hf"):
+                shutil.rmtree("tmp_hf", ignore_errors=True)
+        except Exception:
+            pass
+
+    # 3. Clean Hugging Face cached snapshot for this repo to save disk
+    try:
+        from huggingface_hub.constants import HUGGINGFACE_HUB_CACHE
+        cache_repo_dir = os.path.join(HUGGINGFACE_HUB_CACHE, f"datasets--{hf_user}--{repo_name}")
+        if os.path.exists(cache_repo_dir):
+            shutil.rmtree(cache_repo_dir, ignore_errors=True)
+    except Exception:
+        pass
+
+    # 4. Clear memory caches and run garbage collector
+    try:
+        cleanup_memory()
+    except Exception:
+        pass
+    gc.collect()
+
 def main():
     if not GH_TOKEN or not HF_TOKEN:
         print("Missing GITHUB_TOKEN or HF_TOKEN. Make sure they are set in the environment.")
@@ -724,47 +765,50 @@ def main():
         print(f"Processing: {inst_name} -> {repo_name}")
         print(f"==================================================")
         
-        if inst_name not in tracker:
-            tracker[inst_name] = {"GitHub": {}, "HuggingFace": {}}
-        elif not isinstance(tracker[inst_name], dict):
-            tracker[inst_name] = {"GitHub": {}, "HuggingFace": {}}
-        else:
-            if "GitHub" not in tracker[inst_name]:
-                tracker[inst_name]["GitHub"] = {}
-            if "HuggingFace" not in tracker[inst_name]:
-                tracker[inst_name]["HuggingFace"] = {}
+        try:
+            if inst_name not in tracker:
+                tracker[inst_name] = {"GitHub": {}, "HuggingFace": {}}
+            elif not isinstance(tracker[inst_name], dict):
+                tracker[inst_name] = {"GitHub": {}, "HuggingFace": {}}
+            else:
+                if "GitHub" not in tracker[inst_name]:
+                    tracker[inst_name]["GitHub"] = {}
+                if "HuggingFace" not in tracker[inst_name]:
+                    tracker[inst_name]["HuggingFace"] = {}
+                
+            has_gh = any(tf in GITHUB_TIMEFRAMES for tf in TIMEFRAMES_TO_TEST)
+            has_hf = any(tf in HUGGINGFACE_TIMEFRAMES for tf in TIMEFRAMES_TO_TEST)
             
-        has_gh = any(tf in GITHUB_TIMEFRAMES for tf in TIMEFRAMES_TO_TEST)
-        has_hf = any(tf in HUGGINGFACE_TIMEFRAMES for tf in TIMEFRAMES_TO_TEST)
-        
-        up_gh = False
-        up_hf = False
-        
-        if has_gh:
-            up_gh = sync_ticker_github(inst_name, repo_name, tracker, summary_tracker)
-        if has_hf:
-            up_hf = sync_ticker_huggingface(inst_name, repo_name, tracker, summary_tracker)
+            up_gh = False
+            up_hf = False
             
-        clone_dir = f"gh_clone_{repo_name}"
-        if os.path.exists(clone_dir):
-            shutil.rmtree(clone_dir, ignore_errors=True)
-            
-        # Update tracker after processing each ticker
-        with open(tracker_file, "w") as f:
-            json.dump(tracker, f, indent=2)
-        print(f"  * Tracker metadata saved for {inst_name}")
-            
-        if os.path.exists(".git") and (up_gh or up_hf):
-            subprocess.run(["git", "config", "user.name", "github-actions[bot]"], capture_output=True)
-            subprocess.run(["git", "config", "user.email", "github-actions[bot]@users.noreply.github.com"], capture_output=True)
-            subprocess.run(["git", "add", "tracker.json"], capture_output=True)
-            commit_res = subprocess.run(["git", "commit", "-m", f"Update tracker for {inst_name}"], capture_output=True, text=True)
-            if commit_res.returncode == 0:
-                subprocess.run(["git", "pull", "--quiet", "--rebase", "origin", "main"], capture_output=True)
-                subprocess.run(["git", "push", "--quiet", "origin", "main"], capture_output=True)
+            if has_gh:
+                up_gh = sync_ticker_github(inst_name, repo_name, tracker, summary_tracker)
+            if has_hf:
+                up_hf = sync_ticker_huggingface(inst_name, repo_name, tracker, summary_tracker)
+                
+            # Update tracker after processing each ticker
+            with open(tracker_file, "w") as f:
+                json.dump(tracker, f, indent=2)
+            print(f"  * Tracker metadata saved for {inst_name}")
+                
+            if os.path.exists(".git") and (up_gh or up_hf):
+                subprocess.run(["git", "config", "user.name", "github-actions[bot]"], capture_output=True)
+                subprocess.run(["git", "config", "user.email", "github-actions[bot]@users.noreply.github.com"], capture_output=True)
+                subprocess.run(["git", "add", "tracker.json"], capture_output=True)
+                commit_res = subprocess.run(["git", "commit", "-m", f"Update tracker for {inst_name}"], capture_output=True, text=True)
+                if commit_res.returncode == 0:
+                    subprocess.run(["git", "pull", "--quiet", "--rebase", "origin", "main"], capture_output=True)
+                    subprocess.run(["git", "push", "--quiet", "origin", "main"], capture_output=True)
 
-        # Print detailed, clean summary table for this ticker
-        summary_tracker.print_ticker_summary(inst_name, repo_name)
+            # Print detailed, clean summary table for this ticker
+            summary_tracker.print_ticker_summary(inst_name, repo_name)
+        except Exception as ticker_err:
+            print(f"  [!] Error processing ticker {inst_name}: {ticker_err}")
+        finally:
+            hf_user = get_hf_username()
+            cleanup_ticker_resources(repo_name, hf_user)
+            print(f"  * Cleaned up local storage & memory for {inst_name}")
 
 if __name__ == "__main__":
     main()

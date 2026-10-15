@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import asyncio
 import httpx
@@ -560,8 +561,7 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
                 eta_s = (total_active_blocks - blocks_done) / rate if rate > 0 else 0.0
                 eta_str = format_time_duration(eta_s) if pending else "Done"
                 prog_line = f"  [Progress] {blocks_done:,}/{total_active_blocks:,} ({pct:.1f}%) | Chunks: {chunks_written}/{len(unverified_chunks)} | {rate:.1f} blk/s | ETA: {eta_str}"
-                sys.stdout.write(f"\r{prog_line.ljust(79)[:79]}")
-                sys.stdout.flush()
+                print(f"\r{prog_line.ljust(79)[:79]}", end="", flush=True)
                 last_progress_time = now_t
 
             if failed_retry:

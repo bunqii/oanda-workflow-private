@@ -650,6 +650,7 @@ def sync_ticker_huggingface(inst_name, repo_name, tracker, summary_tracker):
         t_check_hf = time.time()
         if tf_pods and tf_data:
             latest_pod_file = tf_pods[-1]
+            first_pod_file = tf_pods[0]
             try:
                 local_pod_path = hf_hub_download(repo_id=repo_id, filename=latest_pod_file, repo_type="dataset", token=HF_TOKEN)
                 with open(local_pod_path) as pf:
@@ -662,11 +663,23 @@ def sync_ticker_huggingface(inst_name, repo_name, tracker, summary_tracker):
                         now_dt = datetime.now(timezone.utc)
                         if last_dt and (now_dt - last_dt).days <= 2 and status in ["VERIFIED", "VERIFIED_PARTIAL"]:
                             existing_total = tracker.get(inst_name, {}).get("HuggingFace", {}).get(tf, {}).get("total_rows") or pdata.get("row_count") or pdata.get("csv_row_count", 0)
+                            existing_first = tracker.get(inst_name, {}).get("HuggingFace", {}).get(tf, {}).get("first_candle")
+                            if not existing_first and first_pod_file != latest_pod_file:
+                                try:
+                                    first_pod_path = hf_hub_download(repo_id=repo_id, filename=first_pod_file, repo_type="dataset", token=HF_TOKEN)
+                                    with open(first_pod_path) as fpf:
+                                        first_pdata = json.load(fpf)
+                                        fc = first_pdata.get("first_candle") or first_pdata.get("csv_first_candle")
+                                        if fc:
+                                            existing_first = get_candle_time_str(fc)
+                                except Exception:
+                                    pass
+                            first_candle_final = existing_first or get_candle_time_str(first_c)
                             check_duration = time.time() - t_check_hf
                             tf_link = f"{hf_repo_url}/tree/main/{tf}"
                             print(f"  * [HuggingFace] {tf}: Up-to-date ({len(tf_data)} chunks, {existing_total:,} rows)")
                             tracker[inst_name]["HuggingFace"][tf] = {
-                                "first_candle": get_candle_time_str(first_c),
+                                "first_candle": first_candle_final,
                                 "last_candle": get_candle_time_str(last_c),
                                 "total_rows": existing_total,
                                 "chunks_count": len(tf_data),
@@ -680,7 +693,7 @@ def sync_ticker_huggingface(inst_name, repo_name, tracker, summary_tracker):
                                 tf=tf,
                                 chunks=len(tf_data),
                                 rows=existing_total,
-                                first_dt=get_candle_time_str(first_c),
+                                first_dt=first_candle_final,
                                 last_dt=get_candle_time_str(last_c),
                                 status="Up-to-date",
                                 link=tf_link,

@@ -205,6 +205,9 @@ def sync_ticker_github(inst_name, repo_name, tracker):
         is_up, pod_meta = check_github_tf_uptodate(gh_user, repo_name, tf)
         if is_up and pod_meta:
             print(f"  -> Timeframe {tf} (GitHub): Already up-to-date ({pod_meta['chunks_count']} chunks, last: {pod_meta['last_candle']}). Smart skip.")
+            existing_total = tracker.get(inst_name, {}).get("GitHub", {}).get(tf, {}).get("total_rows")
+            if existing_total and existing_total > pod_meta.get("total_rows", 0):
+                pod_meta["total_rows"] = existing_total
             tracker[inst_name]["GitHub"][tf] = {
                 **pod_meta,
                 "platform": "GitHub",
@@ -357,10 +360,11 @@ def sync_ticker_huggingface(inst_name, repo_name, tracker):
                         now_dt = datetime.now(timezone.utc)
                         if (now_dt - last_dt).days <= 2 and status in ["VERIFIED", "VERIFIED_PARTIAL"]:
                             print(f"     Hugging Face {tf}: Already up-to-date ({len(tf_data)} files, last: {last_c['Time']}). Skipping.")
+                            existing_total = tracker.get(inst_name, {}).get("HuggingFace", {}).get(tf, {}).get("total_rows")
                             tracker[inst_name]["HuggingFace"][tf] = {
                                 "first_candle": first_c.get("Time") if first_c else None,
                                 "last_candle": last_c.get("Time"),
-                                "total_rows": pdata.get("row_count") or pdata.get("csv_row_count", 0),
+                                "total_rows": existing_total if (existing_total and existing_total > (pdata.get("row_count") or pdata.get("csv_row_count", 0))) else (pdata.get("row_count") or pdata.get("csv_row_count", 0)),
                                 "chunks_count": len(tf_data),
                                 "format": "parquet" if any(f.endswith(".parquet") for f in tf_data) else "csv",
                                 "platform": "HuggingFace",
@@ -490,10 +494,11 @@ def main():
         if os.path.exists(".git") and (up_gh or up_hf):
             subprocess.run(["git", "config", "user.name", "github-actions[bot]"])
             subprocess.run(["git", "config", "user.email", "github-actions[bot]@users.noreply.github.com"])
-            subprocess.run(["git", "pull", "--rebase", "origin", "main"])
             subprocess.run(["git", "add", "tracker.json"])
-            subprocess.run(["git", "commit", "-m", f"Update tracker for {inst_name}"])
-            subprocess.run(["git", "push", "origin", "main"])
+            commit_res = subprocess.run(["git", "commit", "-m", f"Update tracker for {inst_name}"], capture_output=True, text=True)
+            if commit_res.returncode == 0:
+                subprocess.run(["git", "pull", "--rebase", "origin", "main"])
+                subprocess.run(["git", "push", "origin", "main"])
 
 if __name__ == "__main__":
     main()

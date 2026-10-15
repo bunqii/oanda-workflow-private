@@ -111,7 +111,7 @@ async def find_inception(client, instrument, timeframe):
     print("Finding inception date...")
     url = f"{OANDA_URL}/instruments/{instrument}/candles"
     try:
-        r = await client.get(url, params={"granularity": timeframe, "from": "1971-01-01T00:00:00Z", "count": 1, "price": "M"}, timeout=10.0)
+        r = await client.get(url, params={"granularity": timeframe, "from": "1971-01-01T00:00:00Z", "count": 1, "price": "M"}, headers=HEADERS, timeout=10.0)
         if r.status_code == 200:
             candles = r.json().get('candles', [])
             if candles:
@@ -134,11 +134,12 @@ async def find_latest_complete_candle(client, instrument, timeframe, is_standalo
     if is_standalone:
         print(f"Fetching current market state for {instrument} ({timeframe})...")
     url = f"{OANDA_URL}/instruments/{instrument}/candles"
+    params = {"granularity": timeframe, "count": 2, "price": "M"}
     
     for attempt in range(1, 4):
         try:
             # Fetch last 2 candles of the exact timeframe to guarantee we find the last 'complete' candle
-            r = await client.get(url, params={"granularity": timeframe, "count": 2, "price": "M"}, timeout=10.0)
+            r = await client.get(url, params=params, headers=HEADERS, timeout=10.0)
             if r.status_code == 200:
                 candles = r.json().get('candles', [])
                 for c in reversed(candles):
@@ -147,6 +148,19 @@ async def find_latest_complete_candle(client, instrument, timeframe, is_standalo
                         dt = datetime.strptime(t[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
                         _market_state_cache[cache_key] = (time.time(), dt)
                         return dt
+            elif r.status_code in [401, 403]:
+                # Direct HTTP fallback if connection pool renegotiation caused a transient 401
+                import requests
+                resp = requests.get(url, params=params, headers=HEADERS, timeout=10.0)
+                if resp.status_code == 200:
+                    candles = resp.json().get('candles', [])
+                    for c in reversed(candles):
+                        if c['complete']:
+                            t = c['time']
+                            dt = datetime.strptime(t[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+                            _market_state_cache[cache_key] = (time.time(), dt)
+                            return dt
+                print(f"Market state fetch attempt {attempt} failed with status {r.status_code}")
             else:
                 print(f"Market state fetch attempt {attempt} failed with status {r.status_code}")
         except Exception as e:
@@ -163,7 +177,7 @@ async def fetch_block(client, symbol, timeframe, start_dt, end_dt, block_idx):
     params = {"granularity": timeframe, "from": start_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
               "to": end_dt.strftime("%Y-%m-%dT%H:%M:%SZ"), "price": "M"}
     try:
-        r = await client.get(url, params=params, timeout=30.0)
+        r = await client.get(url, params=params, headers=HEADERS, timeout=30.0)
         if r.status_code == 200:
             return {"block_idx": block_idx, "ok": True, "candles": r.json().get('candles', []), "outcome": {"block_idx": block_idx, "code": 200, "msg": "OK", "params": params}}
         elif r.status_code == 429:

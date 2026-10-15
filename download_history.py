@@ -26,7 +26,7 @@ TIMEFRAME  = "M1"
 
 INSTRUMENT = "BTC_USD"
 BATCH_SIZE = 100
-STAGGER_MS = 1
+STAGGER_MS = 11
 
 # Optional: Set specific start and end dates (format: "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DD").
 # Leave as None to download everything from inception up to the current moment.
@@ -206,6 +206,11 @@ async def fetch_block(client, symbol, timeframe, start_dt, end_dt, block_idx):
             return {"block_idx": block_idx, "ok": False, "retry": False, "outcome": {"block_idx": block_idx, "code": r.status_code, "msg": r.text[:100], "params": params}}
     except Exception as e:
         return {"block_idx": block_idx, "ok": False, "retry": True, "outcome": {"block_idx": block_idx, "code": -1, "msg": str(e)[:100], "params": params}}
+
+async def fetch_block_staggered(client, symbol, timeframe, start_dt, end_dt, block_idx, delay_s):
+    if delay_s > 0:
+        await asyncio.sleep(delay_s)
+    return await fetch_block(client, symbol, timeframe, start_dt, end_dt, block_idx)
 
 # -----------------------------------------------------------------------------
 # Chunk writer
@@ -492,8 +497,11 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
             batch          = pending[:BATCH_SIZE]
             pending        = pending[BATCH_SIZE:]
 
-            # Note: pass symbol & timeframe instead of globals
-            tasks   = [fetch_block(client, symbol, timeframe, b_start, b_end, b_idx) for b_idx, b_start, b_end in batch]
+            # Dispatch batch with smooth micro-stagger to honor OANDA 100 req/s limit and prevent 429 burst errors
+            tasks   = [
+                fetch_block_staggered(client, symbol, timeframe, b_start, b_end, b_idx, i * (STAGGER_MS / 1000.0))
+                for i, (b_idx, b_start, b_end) in enumerate(batch)
+            ]
             results = await asyncio.gather(*tasks)
 
             failed_retry = []
@@ -561,22 +569,26 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
             blocks_done = total_active_blocks - len(pending)
 
             now_t = time.time()
-            if total_active_blocks > 0 and (now_t - last_progress_time >= 4.0 or not pending):
+            if total_active_blocks > 0 and (now_t - last_progress_time >= 0.5 or not pending):
                 pct = (blocks_done / total_active_blocks) * 100.0
                 elapsed_s = now_t - total_start
                 rate = blocks_done / elapsed_s if elapsed_s > 0 else 0.0
                 eta_s = (total_active_blocks - blocks_done) / rate if rate > 0 else 0.0
                 eta_str = format_time_duration(eta_s) if pending else "Done"
-                print(f"    [Progress] {blocks_done:,}/{total_active_blocks:,} blocks ({pct:.1f}%) | {chunks_written}/{len(unverified_chunks)} chunks written | {rate:.1f} blk/s | ETA: {eta_str}")
+                prog_line = f"    [Progress] {blocks_done:,}/{total_active_blocks:,} blocks ({pct:.1f}%) | {chunks_written}/{len(unverified_chunks)} chunks written | {rate:.1f} blk/s | ETA: {eta_str}"
+                print(f"\r{prog_line}".ljust(110), end="", flush=True)
                 last_progress_time = now_t
 
             if failed_retry:
+                print()  # Move past in-place line so retry message is on its own line
                 max_attempts = max(block_attempts[b[0]] for b in failed_retry)
                 sleep_time = min(60, 2 ** min(max_attempts, 6))
                 codes = {all_block_outcomes[b[0]]["code"] for b in failed_retry if b[0] in all_block_outcomes}
                 print(f"    [Retry] {len(failed_retry)} block(s) (codes: {sorted(list(codes), key=lambda x: str(x))}) waiting {sleep_time}s (attempt {max_attempts}/50)...")
                 await asyncio.sleep(sleep_time)
                 loop_iteration += 1
+
+        print()  # Finalize the single in-place progress line with a newline
 
         total_rows_saved = 0
         chunks_saved = 0

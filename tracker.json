@@ -4570,7 +4570,7 @@
         "chunks_count": 270,
         "format": "parquet",
         "platform": "GitHub",
-        "last_updated": "2026-10-16T13:43:17.779644+00:00"
+        "last_updated": "2026-10-16T23:05:04.463758+00:00"
       },
       "D": {
         "first_candle": "2004-05-31T21:00:00.000000000Z",
@@ -4579,7 +4579,7 @@
         "chunks_count": 3,
         "format": "parquet",
         "platform": "GitHub",
-        "last_updated": "2026-10-16T13:43:19.620405+00:00"
+        "last_updated": "2026-10-16T23:05:05.223686+00:00"
       }
     },
     "HuggingFace": {
@@ -4590,7 +4590,7 @@
         "chunks_count": 270,
         "format": "parquet",
         "platform": "HuggingFace",
-        "last_updated": "2026-10-16T13:43:17.779806+00:00"
+        "last_updated": "2026-10-16T23:05:04.463915+00:00"
       },
       "5": {
         "first_candle": "2004-05-31T20:55:00.000000000Z",
@@ -4599,7 +4599,7 @@
         "chunks_count": 270,
         "format": "parquet",
         "platform": "HuggingFace",
-        "last_updated": "2026-10-16T13:43:18.083596+00:00"
+        "last_updated": "2026-10-16T23:05:04.541702+00:00"
       },
       "60": {
         "first_candle": "2004-05-31T20:00:00.000000000Z",
@@ -4608,7 +4608,7 @@
         "chunks_count": 270,
         "format": "parquet",
         "platform": "HuggingFace",
-        "last_updated": "2026-10-16T13:43:18.385573+00:00"
+        "last_updated": "2026-10-16T23:05:04.616427+00:00"
       },
       "D": {
         "first_candle": "2004-05-31T21:00:00.000000000Z",
@@ -4617,7 +4617,16 @@
         "chunks_count": 3,
         "format": "parquet",
         "platform": "HuggingFace",
-        "last_updated": "2026-10-16T13:43:19.620540+00:00"
+        "last_updated": "2026-10-16T23:05:05.223849+00:00"
+      },
+      "5S": {
+        "first_candle": "2004-05-31T20:59:50.000000000Z",
+        "last_candle": "2026-10-16T20:59:00.000000000Z",
+        "total_rows": 65484656,
+        "chunks_count": 1168,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-16T23:05:03.334755+00:00"
       }
     }
   },

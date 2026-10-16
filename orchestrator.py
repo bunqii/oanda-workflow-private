@@ -137,7 +137,15 @@ def ensure_github_repo(repo_name, private=False):
         if post_res.status_code in [201, 422]:
             return True
         if post_res.status_code == 403:
-            print(f"  [!] GitHub repo creation rate-limited (403).")
+            reset_ts = post_res.headers.get("x-ratelimit-reset")
+            reset_msg = ""
+            if reset_ts:
+                try:
+                    reset_dt = datetime.fromtimestamp(int(reset_ts), tz=timezone.utc)
+                    reset_msg = f" (resets at {reset_dt.strftime('%H:%M:%S UTC')})"
+                except Exception:
+                    pass
+            print(f"  [!] GitHub repo creation rate-limited (403){reset_msg}.")
             return False
         print(f"  [!] GitHub repo creation failed ({post_res.status_code}): {post_res.text[:120]}")
     except Exception as e:
@@ -414,6 +422,9 @@ def ensure_hf_repo(api, repo_id):
 
 def push_timeframe_github(clone_dir, tf, gh_user, repo_name, gh_repo_url):
     t_start = time.time()
+    if not os.path.isdir(os.path.join(clone_dir, ".git")):
+        return "Failed", f"{gh_repo_url}/tree/main/{tf}", time.time() - t_start
+
     git_status = subprocess.run(["git", "status", "--porcelain"], cwd=clone_dir, capture_output=True, text=True).stdout
     if not git_status.strip():
         return "Up-to-date", f"{gh_repo_url}/tree/main/{tf}", time.time() - t_start
@@ -469,8 +480,8 @@ def sync_ticker(inst_name, repo_name, tracker, summary_tracker):
     summary_tracker.record_repo(inst_name, "GitHub", gh_repo_url)
     summary_tracker.record_repo(inst_name, "HuggingFace", hf_repo_url)
 
-    ensure_github_repo(repo_name, private=False)
-    ensure_hf_repo(api, hf_repo_id)
+    gh_ready = ensure_github_repo(repo_name, private=False)
+    hf_ready = ensure_hf_repo(api, hf_repo_id)
 
     if "GitHub" not in tracker[inst_name]:
         tracker[inst_name]["GitHub"] = {}
@@ -478,7 +489,7 @@ def sync_ticker(inst_name, repo_name, tracker, summary_tracker):
         tracker[inst_name]["HuggingFace"] = {}
 
     try:
-        existing_hf_files = api.list_repo_files(repo_id=hf_repo_id, repo_type="dataset")
+        existing_hf_files = api.list_repo_files(repo_id=hf_repo_id, repo_type="dataset") if hf_ready else []
     except Exception:
         existing_hf_files = []
 
@@ -490,11 +501,11 @@ def sync_ticker(inst_name, repo_name, tracker, summary_tracker):
 
     for tf in TIMEFRAMES_TO_TEST:
         needs_gh = (tf in GITHUB_TIMEFRAMES)
-        needs_hf = (tf in HUGGINGFACE_TIMEFRAMES)
+        needs_hf = (tf in HUGGINGFACE_TIMEFRAMES) and hf_ready
         
         # 1. Fast remote checks (<1s)
         t_check_gh = time.time()
-        is_up_gh, pod_gh = check_github_tf_uptodate(gh_user, repo_name, tf) if needs_gh else (True, None)
+        is_up_gh, pod_gh = check_github_tf_uptodate(gh_user, repo_name, tf) if (needs_gh and gh_ready) else ((False if (needs_gh and not gh_ready) else True), None)
         check_gh_s = time.time() - t_check_gh
 
         t_check_hf = time.time()
@@ -502,7 +513,7 @@ def sync_ticker(inst_name, repo_name, tracker, summary_tracker):
         check_hf_s = time.time() - t_check_hf
 
         # 2. Both are already up-to-date!
-        if is_up_gh and is_up_hf:
+        if (is_up_gh if needs_gh else True) and (is_up_hf if needs_hf else True):
             meta = pod_gh or pod_hf or tracker.get(inst_name, {}).get("GitHub", {}).get(tf) or tracker.get(inst_name, {}).get("HuggingFace", {}).get(tf) or {}
             chunks = meta.get("chunks_count", 0)
             rows = tracker.get(inst_name, {}).get("GitHub", {}).get(tf, {}).get("total_rows") or tracker.get(inst_name, {}).get("HuggingFace", {}).get(tf, {}).get("total_rows") or meta.get("total_rows", 0)
@@ -510,13 +521,13 @@ def sync_ticker(inst_name, repo_name, tracker, summary_tracker):
             lc = meta.get("last_candle")
             d_range = f"{clean_date_display(fc)} -> {clean_date_display(lc)}" if (fc and lc) else "-"
 
-            gh_part = f"GitHub: Up-to-date ({format_duration(check_gh_s)})" if needs_gh else ""
+            gh_part = f"GitHub: Up-to-date ({format_duration(check_gh_s)})" if (needs_gh and gh_ready) else ("GitHub: Rate-limited" if (needs_gh and not gh_ready) else "")
             hf_part = f"HuggingFace: Up-to-date ({format_duration(check_hf_s)})" if needs_hf else ""
             status_inline = " | ".join([p for p in [gh_part, hf_part] if p])
 
             print(f"  * [{tf:<3}] {chunks:>3} chunks ({rows:>9,d} rows) | {d_range:<33} | {status_inline}")
 
-            if needs_gh and pod_gh:
+            if needs_gh and gh_ready and pod_gh:
                 tracker[inst_name]["GitHub"][tf] = {**pod_gh, "total_rows": rows, "platform": "GitHub", "last_updated": datetime.now(timezone.utc).isoformat()}
                 summary_tracker.add_record(inst_name, "GitHub", tf, chunks, rows, fc, lc, "Up-to-date", f"{gh_repo_url}/tree/main/{tf}", dl_time_s=check_gh_s, push_time_s=0.0)
             if needs_hf and pod_hf:
@@ -531,11 +542,11 @@ def sync_ticker(inst_name, repo_name, tracker, summary_tracker):
         source = "OANDA"
 
         # Try reuse from GitHub (if GitHub is up-to-date and HF needs it)
-        if is_up_gh and needs_gh and not is_up_hf:
+        if is_up_gh and needs_gh and gh_ready and not is_up_hf:
             local_gh_dir = os.path.join(clone_dir, tf)
-            if not os.path.exists(local_gh_dir) or not any(f.endswith(".parquet") for f in os.listdir(local_gh_dir)):
+            if not os.path.isdir(os.path.join(clone_dir, ".git")):
                 run_cmd(f"git clone --quiet --depth 1 https://x-access-token:{GH_TOKEN}@github.com/{gh_user}/{repo_name}.git {clone_dir}")
-            if os.path.exists(local_gh_dir) and any(f.endswith(".parquet") for f in os.listdir(local_gh_dir)):
+            if os.path.isdir(os.path.join(clone_dir, ".git")) and os.path.exists(local_gh_dir) and any(f.endswith(".parquet") for f in os.listdir(local_gh_dir)):
                 for f in os.listdir(local_gh_dir):
                     shutil.copy2(os.path.join(local_gh_dir, f), os.path.join(tf_staging, f))
                 source = "GitHub"
@@ -592,32 +603,43 @@ def sync_ticker(inst_name, repo_name, tracker, summary_tracker):
 
         # --- GITHUB PUSH ---
         if needs_gh:
-            if is_up_gh:
+            if not gh_ready:
+                gh_status_str = "GitHub: Rate-limited"
+            elif is_up_gh:
                 gh_status_str = f"GitHub: Up-to-date ({format_duration(check_gh_s)})"
             else:
-                if not os.path.exists(clone_dir):
+                if not os.path.isdir(os.path.join(clone_dir, ".git")):
                     run_cmd(f"git clone --quiet --depth 1 https://x-access-token:{GH_TOKEN}@github.com/{gh_user}/{repo_name}.git {clone_dir}")
-                gh_tf_dir = os.path.join(clone_dir, tf)
-                os.makedirs(gh_tf_dir, exist_ok=True)
-                for f in os.listdir(tf_staging):
-                    shutil.copy2(os.path.join(tf_staging, f), os.path.join(gh_tf_dir, f))
                 
-                status_gh, link_gh, push_gh_s = push_timeframe_github(clone_dir, tf, gh_user, repo_name, gh_repo_url)
+                if not os.path.isdir(os.path.join(clone_dir, ".git")):
+                    status_gh = "Failed"
+                    link_gh = f"{gh_repo_url}/tree/main/{tf}"
+                    push_gh_s = 0.0
+                    gh_status_str = "GitHub: Clone Failed"
+                else:
+                    gh_tf_dir = os.path.join(clone_dir, tf)
+                    os.makedirs(gh_tf_dir, exist_ok=True)
+                    for f in os.listdir(tf_staging):
+                        shutil.copy2(os.path.join(tf_staging, f), os.path.join(gh_tf_dir, f))
+                    status_gh, link_gh, push_gh_s = push_timeframe_github(clone_dir, tf, gh_user, repo_name, gh_repo_url)
+
                 if status_gh == "Pushed":
                     updated_any = True
                     summary_tracker.record_push(inst_name, "GitHub", link_gh)
                     timing_lbl = f"Push {format_duration(push_gh_s)}" if source != "OANDA" else f"DL {format_duration(acq_s)} / Push {format_duration(push_gh_s)}"
                     gh_status_str = f"GitHub: Pushed in {format_duration(acq_s + push_gh_s)} ({timing_lbl}) -> {link_gh}"
+                    tracker[inst_name]["GitHub"][tf] = {
+                        "first_candle": first_candle, "last_candle": last_candle, "total_rows": total_rows,
+                        "chunks_count": chunks, "format": "parquet" if parquet_files else "csv", "platform": "GitHub", "last_updated": datetime.now(timezone.utc).isoformat()
+                    }
                 elif status_gh == "Up-to-date":
                     gh_status_str = f"GitHub: Up-to-date"
                 else:
-                    gh_status_str = f"GitHub: Push Failed ({format_duration(push_gh_s)})"
+                    if status_gh != "Failed":
+                        gh_status_str = f"GitHub: Push Failed ({format_duration(push_gh_s)})"
 
-                summary_tracker.add_record(inst_name, "GitHub", tf, chunks, total_rows, first_candle, last_candle, status_gh, link_gh, dl_time_s=acq_s, push_time_s=push_gh_s, is_reused=(source != "OANDA"))
-                tracker[inst_name]["GitHub"][tf] = {
-                    "first_candle": first_candle, "last_candle": last_candle, "total_rows": total_rows,
-                    "chunks_count": chunks, "format": "parquet" if parquet_files else "csv", "platform": "GitHub", "last_updated": datetime.now(timezone.utc).isoformat()
-                }
+                if status_gh in ["Pushed", "Up-to-date"]:
+                    summary_tracker.add_record(inst_name, "GitHub", tf, chunks, total_rows, first_candle, last_candle, status_gh, link_gh, dl_time_s=acq_s, push_time_s=push_gh_s, is_reused=(source != "OANDA"))
 
         # --- HUGGING FACE PUSH ---
         if needs_hf:
@@ -630,16 +652,17 @@ def sync_ticker(inst_name, repo_name, tracker, summary_tracker):
                     summary_tracker.record_push(inst_name, "HuggingFace", link_hf)
                     timing_lbl = f"Upload {format_duration(push_hf_s)}" if source != "OANDA" else f"DL {format_duration(acq_s)} / Up {format_duration(push_hf_s)}"
                     hf_status_str = f"HuggingFace: Pushed in {format_duration(acq_s + push_hf_s)} ({timing_lbl}) -> {link_hf}"
+                    tracker[inst_name]["HuggingFace"][tf] = {
+                        "first_candle": first_candle, "last_candle": last_candle, "total_rows": total_rows,
+                        "chunks_count": chunks, "format": "parquet" if parquet_files else "csv", "platform": "HuggingFace", "last_updated": datetime.now(timezone.utc).isoformat()
+                    }
                 elif status_hf == "Up-to-date":
                     hf_status_str = f"HuggingFace: Up-to-date"
                 else:
                     hf_status_str = f"HuggingFace: Upload Failed ({format_duration(push_hf_s)})"
 
-                summary_tracker.add_record(inst_name, "HuggingFace", tf, chunks, total_rows, first_candle, last_candle, status_hf, link_hf, dl_time_s=acq_s, push_time_s=push_hf_s, is_reused=(source != "OANDA"))
-                tracker[inst_name]["HuggingFace"][tf] = {
-                    "first_candle": first_candle, "last_candle": last_candle, "total_rows": total_rows,
-                    "chunks_count": chunks, "format": "parquet" if parquet_files else "csv", "platform": "HuggingFace", "last_updated": datetime.now(timezone.utc).isoformat()
-                }
+                if status_hf in ["Pushed", "Up-to-date"]:
+                    summary_tracker.add_record(inst_name, "HuggingFace", tf, chunks, total_rows, first_candle, last_candle, status_hf, link_hf, dl_time_s=acq_s, push_time_s=push_hf_s, is_reused=(source != "OANDA"))
 
         # 5. Print clean inline summary for this timeframe!
         status_line = " | ".join([p for p in [gh_status_str, hf_status_str] if p])

@@ -485,11 +485,11 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
                    if b_idx not in skippable]
         total_active_blocks = len(pending)
         last_progress_time = 0.0
-        last_logged_pct = -10
 
         is_ci = os.getenv("GITHUB_ACTIONS") == "true" or os.getenv("CI") == "true" or not sys.stdout.isatty()
-        if is_ci and not is_standalone:
-            print(f"::group::  * [{p_display_tf:<3}] OANDA DL Progress ({total_active_blocks:,} blocks)")
+        is_high_res = (p_display_tf in ["5S", "1", "S5", "M1"] or timeframe in ["S5", "M1"])
+        milestone_step = 5.0 if is_high_res else 25.0
+        last_logged_milestone = 0.0
 
         block_attempts = defaultdict(int)
         loop_iteration = 1
@@ -579,11 +579,11 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
                 prog_line = f"  [Progress] {blocks_done:,}/{total_active_blocks:,} ({pct:.1f}%) | Chunks: {chunks_written}/{len(unverified_chunks)} | {rate:.1f} blk/s | ETA: {eta_str}"
 
                 if is_ci:
-                    should_log = (not pending) or (pct - last_logged_pct >= 10.0) or (now_t - last_progress_time >= 30.0 and pct > last_logged_pct)
-                    if should_log:
-                        print(f"  {prog_line}")
-                        last_logged_pct = int(pct // 10) * 10
-                        last_progress_time = now_t
+                    current_milestone = int(pct // milestone_step) * milestone_step
+                    should_log = (current_milestone > last_logged_milestone) or (not pending and last_logged_milestone < 100.0)
+                    if should_log and total_active_blocks > 0:
+                        print(prog_line)
+                        last_logged_milestone = 100.0 if not pending else current_milestone
                 else:
                     if now_t - last_progress_time >= 0.25 or not pending:
                         sys.stdout.write(f"\r\x1b[2K{prog_line}")
@@ -601,9 +601,7 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
                 await asyncio.sleep(sleep_time)
                 loop_iteration += 1
 
-        if is_ci and not is_standalone:
-            print("::endgroup::")
-        elif not is_ci:
+        if not is_ci:
             sys.stdout.write("\r\x1b[2K")
             sys.stdout.flush()
 

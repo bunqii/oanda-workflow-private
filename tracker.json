@@ -16,7 +16,7 @@
         "chunks_count": 3,
         "format": "parquet",
         "platform": "GitHub",
-        "last_updated": "2026-10-16T01:04:33.433277+00:00"
+        "last_updated": "2026-10-16T13:44:01.309335+00:00"
       },
       "1": {
         "first_candle": "2006-03-19T20:29:00.000000000Z",
@@ -25,7 +25,7 @@
         "chunks_count": 248,
         "format": "parquet",
         "platform": "GitHub",
-        "last_updated": "2026-10-16T01:04:32.596346+00:00"
+        "last_updated": "2026-10-16T13:43:59.591601+00:00"
       }
     },
     "HuggingFace": {
@@ -36,7 +36,7 @@
         "chunks_count": 248,
         "format": "parquet",
         "platform": "HuggingFace",
-        "last_updated": "2026-10-16T01:04:34.796717+00:00"
+        "last_updated": "2026-10-16T13:44:00.129535+00:00"
       },
       "D": {
         "first_candle": "2020-01-01T22:00:00.000000000Z",
@@ -45,7 +45,7 @@
         "chunks_count": 3,
         "format": "parquet",
         "platform": "HuggingFace",
-        "last_updated": "2026-10-16T01:04:35.078157+00:00"
+        "last_updated": "2026-10-16T13:44:01.309474+00:00"
       },
       "5S": {
         "first_candle": "2026-10-12T00:00:00.000000000Z",
@@ -59,11 +59,11 @@
       "1": {
         "first_candle": "2026-10-01T00:00:00.000000000Z",
         "last_candle": "2026-10-15T03:04:00.000000000Z",
-        "total_rows": 7152147,
+        "total_rows": 7152078,
         "chunks_count": 248,
         "format": "parquet",
         "platform": "HuggingFace",
-        "last_updated": "2026-10-16T01:04:34.307153+00:00"
+        "last_updated": "2026-10-16T13:43:59.591756+00:00"
       },
       "5": {
         "first_candle": "2026-10-01T00:00:00.000000000Z",
@@ -72,7 +72,7 @@
         "chunks_count": 248,
         "format": "parquet",
         "platform": "HuggingFace",
-        "last_updated": "2026-10-16T01:04:34.532408+00:00"
+        "last_updated": "2026-10-16T13:43:59.857891+00:00"
       }
     }
   },
@@ -4454,8 +4454,64 @@
     }
   },
   "JP225Y_JPY": {
-    "GitHub": {},
-    "HuggingFace": {}
+    "GitHub": {
+      "1": {
+        "first_candle": "2003-03-13T14:00:00.000000000Z",
+        "last_candle": "2026-10-16T13:43:00.000000000Z",
+        "total_rows": 4941091,
+        "chunks_count": 284,
+        "format": "parquet",
+        "platform": "GitHub",
+        "last_updated": "2026-10-16T13:45:04.428525+00:00"
+      },
+      "D": {
+        "first_candle": "2003-03-13T22:00:00.000000000Z",
+        "last_candle": "2026-10-14T21:00:00.000000000Z",
+        "total_rows": 6130,
+        "chunks_count": 3,
+        "format": "parquet",
+        "platform": "GitHub",
+        "last_updated": "2026-10-16T13:45:39.265360+00:00"
+      }
+    },
+    "HuggingFace": {
+      "1": {
+        "first_candle": "2003-03-13T14:00:00.000000000Z",
+        "last_candle": "2026-10-16T13:43:00.000000000Z",
+        "total_rows": 4941091,
+        "chunks_count": 284,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-16T13:45:04.428592+00:00"
+      },
+      "5": {
+        "first_candle": "2003-03-13T14:00:00.000000000Z",
+        "last_candle": "2026-10-16T13:40:00.000000000Z",
+        "total_rows": 1258439,
+        "chunks_count": 284,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-16T13:45:33.505016+00:00"
+      },
+      "60": {
+        "first_candle": "2003-03-13T14:00:00.000000000Z",
+        "last_candle": "2026-10-16T12:00:00.000000000Z",
+        "total_rows": 118545,
+        "chunks_count": 284,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-16T13:45:37.460801+00:00"
+      },
+      "D": {
+        "first_candle": "2003-03-13T22:00:00.000000000Z",
+        "last_candle": "2026-10-14T21:00:00.000000000Z",
+        "total_rows": 6130,
+        "chunks_count": 3,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-16T13:45:39.265429+00:00"
+      }
+    }
   },
   "EUR_AUD": {
     "GitHub": {},

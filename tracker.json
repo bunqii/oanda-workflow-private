@@ -4263,5 +4263,46 @@
         "last_updated": "2026-10-16T01:18:32.937565+00:00"
       }
     }
+  },
+  "AUD_NZD": {
+    "GitHub": {},
+    "HuggingFace": {
+      "1": {
+        "first_candle": "2004-05-03T20:59:00.000000000Z",
+        "last_candle": "2026-10-16T01:17:00.000000000Z",
+        "total_rows": 8026397,
+        "chunks_count": 270,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-16T01:20:05.838526+00:00"
+      },
+      "5": {
+        "first_candle": "2004-05-03T20:55:00.000000000Z",
+        "last_candle": "2026-10-16T01:15:00.000000000Z",
+        "total_rows": 1636720,
+        "chunks_count": 270,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-16T01:20:41.709971+00:00"
+      },
+      "60": {
+        "first_candle": "2004-05-03T20:00:00.000000000Z",
+        "last_candle": "2026-10-16T00:00:00.000000000Z",
+        "total_rows": 138182,
+        "chunks_count": 270,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-16T01:20:56.041392+00:00"
+      },
+      "D": {
+        "first_candle": "2004-05-03T21:00:00.000000000Z",
+        "last_candle": "2026-10-14T21:00:00.000000000Z",
+        "total_rows": 6476,
+        "chunks_count": 3,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-16T01:20:58.871392+00:00"
+      }
+    }
   }
 }

@@ -3994,5 +3994,65 @@
         "last_updated": "2026-10-16T00:58:19.321843+00:00"
       }
     }
+  },
+  "USD_SEK": {
+    "GitHub": {
+      "1": {
+        "first_candle": "2004-05-31T20:59:00.000000000Z",
+        "last_candle": "2026-10-16T00:57:00.000000000Z",
+        "total_rows": 8003065,
+        "chunks_count": 270,
+        "format": "parquet",
+        "platform": "GitHub",
+        "last_updated": "2026-10-16T00:59:41.543251+00:00"
+      },
+      "D": {
+        "first_candle": "2004-05-31T21:00:00.000000000Z",
+        "last_candle": "2026-10-14T21:00:00.000000000Z",
+        "total_rows": 6516,
+        "chunks_count": 3,
+        "format": "parquet",
+        "platform": "GitHub",
+        "last_updated": "2026-10-16T01:00:45.197050+00:00"
+      }
+    },
+    "HuggingFace": {
+      "1": {
+        "first_candle": "2004-05-31T20:59:00.000000000Z",
+        "last_candle": "2026-10-16T00:57:00.000000000Z",
+        "total_rows": 8003065,
+        "chunks_count": 270,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-16T01:00:59.680259+00:00"
+      },
+      "5": {
+        "first_candle": "2004-05-31T20:55:00.000000000Z",
+        "last_candle": "2026-10-16T00:55:00.000000000Z",
+        "total_rows": 1633544,
+        "chunks_count": 270,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-16T01:01:45.522859+00:00"
+      },
+      "60": {
+        "first_candle": "2004-05-31T20:00:00.000000000Z",
+        "last_candle": "2026-10-16T00:00:00.000000000Z",
+        "total_rows": 138093,
+        "chunks_count": 270,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-16T01:02:00.279586+00:00"
+      },
+      "D": {
+        "first_candle": "2004-05-31T21:00:00.000000000Z",
+        "last_candle": "2026-10-14T21:00:00.000000000Z",
+        "total_rows": 6516,
+        "chunks_count": 3,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-16T01:02:01.832168+00:00"
+      }
+    }
   }
 }

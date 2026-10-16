@@ -5355,5 +5355,46 @@
         "last_updated": "2026-10-16T02:10:33.637665+00:00"
       }
     }
+  },
+  "USB10Y_USD": {
+    "GitHub": {},
+    "HuggingFace": {
+      "1": {
+        "first_candle": "2003-02-26T19:59:00.000000000Z",
+        "last_candle": "2026-10-16T02:08:00.000000000Z",
+        "total_rows": 4324272,
+        "chunks_count": 285,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-16T02:11:48.735804+00:00"
+      },
+      "5": {
+        "first_candle": "2003-03-20T18:00:00.000000000Z",
+        "last_candle": "2026-10-16T02:05:00.000000000Z",
+        "total_rows": 1370830,
+        "chunks_count": 284,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-16T02:12:14.616614+00:00"
+      },
+      "60": {
+        "first_candle": "2003-03-20T18:00:00.000000000Z",
+        "last_candle": "2026-10-16T01:00:00.000000000Z",
+        "total_rows": 134977,
+        "chunks_count": 284,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-16T02:12:27.819084+00:00"
+      },
+      "D": {
+        "first_candle": "2003-03-20T22:00:00.000000000Z",
+        "last_candle": "2026-10-14T21:00:00.000000000Z",
+        "total_rows": 6067,
+        "chunks_count": 3,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-16T02:12:30.513370+00:00"
+      }
+    }
   }
 }

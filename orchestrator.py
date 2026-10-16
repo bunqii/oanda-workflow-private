@@ -189,7 +189,7 @@ def clean_date_display(val):
     return s[:10]
 
 def get_repo_name(inst_name, inst_dict):
-    display = inst_dict.get(inst_name, {}).get('displayName', '').replace('/', '').replace('\\', '').replace(' ', '-')
+    display = inst_dict.get(inst_name, {}).get('displayName', '').replace('/', '').replace('\\', '').replace(' ', '-').replace('(', '').replace(')', '')
     name_no_us = inst_name.replace("_", "")
     return f"OANDA_{name_no_us}_{display}" if display else f"OANDA_{name_no_us}"
 

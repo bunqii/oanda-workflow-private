@@ -12,6 +12,9 @@ from dateutil.relativedelta import relativedelta
 from dateutil import parser
 from dateutil.tz import tzlocal
 
+if sys.platform == "win32":
+    os.system('')
+
 # =============================================================================
 # CUSTOMIZABLE PARAMETERS
 # =============================================================================
@@ -120,8 +123,9 @@ def gen_chunks(start, end, cs):
 # -----------------------------------------------------------------------------
 # API helpers
 # -----------------------------------------------------------------------------
-async def find_inception(client, instrument, timeframe):
-    print("Finding inception date...")
+async def find_inception(client, instrument, timeframe, verbose=True):
+    if verbose:
+        print("Finding inception date...")
     url = f"{OANDA_URL}/instruments/{instrument}/candles"
     try:
         r = await client.get(url, params={"granularity": timeframe, "from": "1971-01-01T00:00:00Z", "count": 1, "price": "M"}, headers=HEADERS, timeout=10.0)
@@ -129,10 +133,12 @@ async def find_inception(client, instrument, timeframe):
             candles = r.json().get('candles', [])
             if candles:
                 t = candles[0]['time']
-                print(f"-> Inception: {t}")
+                if verbose:
+                    print(f"-> Inception: {t}")
                 return datetime.strptime(t[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
     except Exception as e:
-        print(f"Inception error: {e}")
+        if verbose:
+            print(f"Inception error: {e}")
     return datetime(2005, 1, 1, tzinfo=timezone.utc)
 
 _market_state_cache = {}
@@ -326,9 +332,11 @@ def write_chunk_to_disk(save_dir, symbol, timeframe, c_start, c_end, buf, now_ut
 # -----------------------------------------------------------------------------
 # Main
 # -----------------------------------------------------------------------------
-async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, save_dir, file_prefix=None, file_tf=None):
+async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, save_dir, file_prefix=None, file_tf=None, is_standalone=None):
     os.makedirs(save_dir, exist_ok=True)
     now_utc = datetime.now(timezone.utc)
+    if is_standalone is None:
+        is_standalone = (__name__ == "__main__")
 
     limits = httpx.Limits(max_connections=200, max_keepalive_connections=100, keepalive_expiry=30.0)
     timeout = httpx.Timeout(30.0, connect=10.0)
@@ -340,7 +348,7 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
     async with client_ctx as client:
         # Start date handling
         if not start_dt:
-            start_dt = await find_inception(client, symbol, timeframe)
+            start_dt = await find_inception(client, symbol, timeframe, verbose=is_standalone)
         else:
             if start_dt.tzinfo is None:
                 start_dt = start_dt.replace(tzinfo=timezone.utc)
@@ -356,7 +364,6 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
             else:
                 end_dt = end_dt.astimezone(timezone.utc)
 
-        is_standalone = (__name__ == "__main__")
         from dateutil import tz
         ist_tz = tz.gettz('Asia/Kolkata')
         s_local = start_dt.astimezone(ist_tz).strftime("%Y-%m-%d %H:%M:%S")
@@ -367,9 +374,6 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
             print(f"OANDA Fast Downloader - Streaming Hybrid v3.5 ({symbol})")
             print("==================================================")
             print(f"Target Range (IST): {s_local} to {e_local}")
-        else:
-            # Concise one-liner for server.py logs
-            print(f"[OANDA] {symbol} | {s_local} -> {e_local} IST")
 
         global_latest_complete_dt = await find_latest_complete_candle(client, symbol, timeframe, is_standalone)
 
@@ -415,17 +419,17 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
 
         skipped_count = len(all_chunks) - len(unverified_chunks)
         if not unverified_chunks:
-            print(f"  * {symbol} ({timeframe}): All {len(all_chunks)} chunks up-to-date (cached)")
+            if is_standalone:
+                print(f"  * {symbol} ({timeframe}): All {len(all_chunks)} chunks up-to-date (cached)")
             return
-
-        print(f"  * {symbol} ({timeframe}): {skipped_count} chunks cached | {len(unverified_chunks)} chunk(s) to download")
 
         fetch_start = max(unverified_chunks[0][0], start_dt)
         max_valid_fetch_end = global_latest_complete_dt + timedelta(minutes=TIMEFRAME_MINUTES[timeframe])
         fetch_end   = min(unverified_chunks[-1][1], end_dt, max_valid_fetch_end)
         
         if fetch_start >= fetch_end:
-            print(f"  * {symbol} ({timeframe}): All data up to {fetch_end.strftime('%Y-%m-%d')} already verified")
+            if is_standalone:
+                print(f"  * {symbol} ({timeframe}): All data up to {fetch_end.strftime('%Y-%m-%d')} already verified")
             return
 
         block_dur  = timedelta(minutes=5000 * TIMEFRAME_MINUTES[timeframe])
@@ -435,7 +439,14 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
             nxt = min(cur + block_dur, fetch_end)
             api_blocks.append((cur, nxt))
             cur = nxt
-        print(f"    Fetching {len(api_blocks)} API blocks ({fetch_start.strftime('%Y-%m-%d')} -> {fetch_end.strftime('%Y-%m-%d')})...")
+
+        p_display_tf = file_tf if file_tf else timeframe
+        d_range_str = f"{fetch_start.strftime('%Y-%m-%d')} -> {fetch_end.strftime('%Y-%m-%d')}"
+        if is_standalone:
+            print(f"  * {symbol} ({timeframe}): {skipped_count} chunks cached | {len(unverified_chunks)} chunk(s) to download")
+            print(f"    Fetching {len(api_blocks):,} API blocks ({d_range_str})...")
+        else:
+            print(f"  * [{p_display_tf:<3}] OANDA DL: {skipped_count} cached | {len(unverified_chunks)} chunks to dl ({len(api_blocks):,} blocks | {d_range_str})")
 
         # 3. Pre-compute block↔chunk overlap
         c_start_strs = [c.strftime("%Y-%m-%dT%H:%M:%S.000000000Z") for c, _ in unverified_chunks]
@@ -474,6 +485,11 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
                    if b_idx not in skippable]
         total_active_blocks = len(pending)
         last_progress_time = 0.0
+        last_logged_pct = -10
+
+        is_ci = os.getenv("GITHUB_ACTIONS") == "true" or os.getenv("CI") == "true" or not sys.stdout.isatty()
+        if is_ci and not is_standalone:
+            print(f"::group::  * [{p_display_tf:<3}] OANDA DL Progress ({total_active_blocks:,} blocks)")
 
         block_attempts = defaultdict(int)
         loop_iteration = 1
@@ -554,18 +570,30 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
             blocks_done = total_active_blocks - len(pending)
 
             now_t = time.time()
-            if total_active_blocks > 0 and (now_t - last_progress_time >= 0.5 or not pending):
+            if total_active_blocks > 0:
                 pct = (blocks_done / total_active_blocks) * 100.0
                 elapsed_s = now_t - total_start
                 rate = blocks_done / elapsed_s if elapsed_s > 0 else 0.0
                 eta_s = (total_active_blocks - blocks_done) / rate if rate > 0 else 0.0
                 eta_str = format_time_duration(eta_s) if pending else "Done"
                 prog_line = f"  [Progress] {blocks_done:,}/{total_active_blocks:,} ({pct:.1f}%) | Chunks: {chunks_written}/{len(unverified_chunks)} | {rate:.1f} blk/s | ETA: {eta_str}"
-                print(f"\r{prog_line.ljust(79)[:79]}", end="", flush=True)
-                last_progress_time = now_t
+
+                if is_ci:
+                    should_log = (not pending) or (pct - last_logged_pct >= 10.0) or (now_t - last_progress_time >= 30.0 and pct > last_logged_pct)
+                    if should_log:
+                        print(f"  {prog_line}")
+                        last_logged_pct = int(pct // 10) * 10
+                        last_progress_time = now_t
+                else:
+                    if now_t - last_progress_time >= 0.25 or not pending:
+                        sys.stdout.write(f"\r\x1b[2K{prog_line}")
+                        sys.stdout.flush()
+                        last_progress_time = now_t
 
             if failed_retry:
-                print()  # Move past in-place line so retry message is on its own line
+                if not is_ci:
+                    sys.stdout.write("\r\x1b[2K")
+                    sys.stdout.flush()
                 max_attempts = max(block_attempts[b[0]] for b in failed_retry)
                 sleep_time = min(60, 2 ** min(max_attempts, 6))
                 codes = {all_block_outcomes[b[0]]["code"] for b in failed_retry if b[0] in all_block_outcomes}
@@ -573,28 +601,38 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
                 await asyncio.sleep(sleep_time)
                 loop_iteration += 1
 
-        print()  # Finalize the single in-place progress line with a newline
+        if is_ci and not is_standalone:
+            print("::endgroup::")
+        elif not is_ci:
+            sys.stdout.write("\r\x1b[2K")
+            sys.stdout.flush()
 
-        total_rows_saved = 0
-        chunks_saved = 0
-        t_net = time.time() - total_start
-        try:
-            for c_idx, fut in write_futures:
-                fname, rows, status = fut.result()
-                total_rows_saved += rows
-                chunks_saved += 1
-                if len(write_futures) <= 3:
-                    print(f"    Saved: {fname} ({rows:,} rows)")
-            if len(write_futures) > 3:
-                print(f"    Saved {chunks_saved} chunks ({total_rows_saved:,} rows) in {time.time()-total_start-t_net:.1f}s")
-        except Exception as e:
-            print(f"    [Error] Writing chunk: {e}")
-        finally:
-            write_pool.shutdown(wait=False)
+        if is_standalone:
+            total_rows_saved = 0
+            chunks_saved = 0
+            t_net = time.time() - total_start
+            try:
+                for c_idx, fut in write_futures:
+                    fname, rows, status = fut.result()
+                    total_rows_saved += rows
+                    chunks_saved += 1
+                    if len(write_futures) <= 3:
+                        print(f"    Saved: {fname} ({rows:,} rows)")
+                if len(write_futures) > 3:
+                    print(f"    Saved {chunks_saved} chunks ({total_rows_saved:,} rows) in {time.time()-total_start-t_net:.1f}s")
+                print(f"    Download finished in {time.time()-total_start:.1f}s")
+            except Exception as e:
+                print(f"    [Error] Writing chunk: {e}")
+            finally:
+                write_pool.shutdown(wait=False)
+        else:
+            try:
+                for c_idx, fut in write_futures:
+                    fut.result()
+            finally:
+                write_pool.shutdown(wait=False)
 
-        print(f"    Download finished in {time.time()-total_start:.1f}s")
-
-def bulk_download_and_split(symbol, timeframe, start_dt, end_dt, chunk_size, save_dir, seconds_per_candle=None, file_prefix=None, file_tf=None):
+def bulk_download_and_split(symbol, timeframe, start_dt, end_dt, chunk_size, save_dir, seconds_per_candle=None, file_prefix=None, file_tf=None, is_standalone=None):
     """
     Synchronous wrapper to safely run the asyncio downloader loop from inside
     a threaded web server environment (like Flask) without blocking the main event loop.
@@ -602,7 +640,7 @@ def bulk_download_and_split(symbol, timeframe, start_dt, end_dt, chunk_size, sav
     import threading
 
     def run_in_thread():
-        asyncio.run(_async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, save_dir, file_prefix, file_tf))
+        asyncio.run(_async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, save_dir, file_prefix, file_tf, is_standalone=is_standalone))
 
     thread = threading.Thread(target=run_in_thread, daemon=True)
     thread.start()

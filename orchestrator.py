@@ -556,7 +556,7 @@ def sync_ticker(inst_name, repo_name, tracker, summary_tracker):
         if not any(f.endswith(".parquet") for f in os.listdir(tf_staging)):
             oanda_tf = map_oanda_tf(tf)
             chunk_size = get_chunk_size(tf)
-            bulk_download_and_split(inst_name, oanda_tf, None, None, chunk_size, tf_staging, file_prefix=repo_name, file_tf=tf)
+            bulk_download_and_split(inst_name, oanda_tf, None, None, chunk_size, tf_staging, file_prefix=repo_name, file_tf=tf, is_standalone=False)
             source = "OANDA"
 
         acq_s = time.time() - t_acq

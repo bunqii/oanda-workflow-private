@@ -5560,5 +5560,46 @@
         "last_updated": "2026-10-16T02:20:44.229006+00:00"
       }
     }
+  },
+  "NAS100_USD": {
+    "GitHub": {},
+    "HuggingFace": {
+      "1": {
+        "first_candle": "2003-03-21T06:15:00.000000000Z",
+        "last_candle": "2026-10-16T02:19:00.000000000Z",
+        "total_rows": 6829761,
+        "chunks_count": 284,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-16T02:22:12.722853+00:00"
+      },
+      "5": {
+        "first_candle": "2003-03-21T06:15:00.000000000Z",
+        "last_candle": "2026-10-16T02:15:00.000000000Z",
+        "total_rows": 1560027,
+        "chunks_count": 284,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-16T02:22:40.350052+00:00"
+      },
+      "60": {
+        "first_candle": "2003-03-21T07:00:00.000000000Z",
+        "last_candle": "2026-10-16T01:00:00.000000000Z",
+        "total_rows": 140584,
+        "chunks_count": 284,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-16T02:22:54.326767+00:00"
+      },
+      "D": {
+        "first_candle": "2003-03-23T22:00:00.000000000Z",
+        "last_candle": "2026-10-14T21:00:00.000000000Z",
+        "total_rows": 6130,
+        "chunks_count": 3,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-16T02:22:56.931341+00:00"
+      }
+    }
   }
 }

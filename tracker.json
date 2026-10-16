@@ -5396,5 +5396,46 @@
         "last_updated": "2026-10-16T02:12:30.513370+00:00"
       }
     }
+  },
+  "EU50_EUR": {
+    "GitHub": {},
+    "HuggingFace": {
+      "1": {
+        "first_candle": "2003-09-19T10:02:00.000000000Z",
+        "last_candle": "2026-10-16T02:11:00.000000000Z",
+        "total_rows": 2727584,
+        "chunks_count": 278,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-16T02:13:36.214579+00:00"
+      },
+      "5": {
+        "first_candle": "2003-09-19T10:00:00.000000000Z",
+        "last_candle": "2026-10-16T02:05:00.000000000Z",
+        "total_rows": 834806,
+        "chunks_count": 278,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-16T02:13:58.906712+00:00"
+      },
+      "60": {
+        "first_candle": "2003-09-19T10:00:00.000000000Z",
+        "last_candle": "2026-10-16T01:00:00.000000000Z",
+        "total_rows": 89727,
+        "chunks_count": 278,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-16T02:14:11.355328+00:00"
+      },
+      "D": {
+        "first_candle": "2003-09-21T21:00:00.000000000Z",
+        "last_candle": "2026-10-14T21:00:00.000000000Z",
+        "total_rows": 5882,
+        "chunks_count": 3,
+        "format": "parquet",
+        "platform": "HuggingFace",
+        "last_updated": "2026-10-16T02:14:14.078303+00:00"
+      }
+    }
   }
 }

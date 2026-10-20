@@ -241,7 +241,7 @@ def write_chunk_to_disk(save_dir, symbol, timeframe, c_start, c_end, buf, now_ut
     import pandas as pd
 
     if n > 0:
-        df = pd.DataFrame({
+        new_df = pd.DataFrame({
             "time_str": times_l,
             "open": opens_l,
             "high": highs_l,
@@ -249,16 +249,28 @@ def write_chunk_to_disk(save_dir, symbol, timeframe, c_start, c_end, buf, now_ut
             "close": closes_l,
             "volume": vols_l
         })
-        df.drop_duplicates(subset=["time_str"], inplace=True)
-        df.sort_values("time_str", inplace=True)
+        new_df.drop_duplicates(subset=["time_str"], inplace=True)
+        new_df["time"] = (pd.to_datetime(new_df["time_str"]).astype("int64") // 10**9).astype("int64")
+        new_df["open"] = new_df["open"].astype("float64")
+        new_df["high"] = new_df["high"].astype("float64")
+        new_df["low"] = new_df["low"].astype("float64")
+        new_df["close"] = new_df["close"].astype("float64")
+        new_df["volume"] = new_df["volume"].astype("int64")
 
-        # Fast vectorized Unix timestamp conversion without Python strptime
-        df["time"] = (pd.to_datetime(df["time_str"]).astype("int64") // 10**9).astype("int64")
-        df["open"] = df["open"].astype("float64")
-        df["high"] = df["high"].astype("float64")
-        df["low"] = df["low"].astype("float64")
-        df["close"] = df["close"].astype("float64")
-        df["volume"] = df["volume"].astype("int64")
+        # Merge with existing parquet file if present on disk
+        if os.path.exists(parquet_file):
+            try:
+                old_df = pd.read_parquet(parquet_file)
+                if "time_str" not in old_df.columns and "time" in old_df.columns:
+                    old_df["time_str"] = pd.to_datetime(old_df["time"], unit="s", utc=True).dt.strftime("%Y-%m-%dT%H:%M:%S.000000000Z")
+                combined_df = pd.concat([old_df, new_df], ignore_index=True)
+                combined_df.drop_duplicates(subset=["time"], inplace=True)
+                combined_df.sort_values("time", inplace=True)
+                df = combined_df
+            except Exception:
+                df = new_df
+        else:
+            df = new_df
 
         n = len(df)
         first_row = df.iloc[0]
@@ -285,6 +297,40 @@ def write_chunk_to_disk(save_dir, symbol, timeframe, c_start, c_end, buf, now_ut
 
         out_df = df[["time", "open", "high", "low", "close", "volume"]]
         out_df.to_parquet(parquet_file, compression="snappy", index=False)
+    elif os.path.exists(parquet_file):
+        try:
+            df = pd.read_parquet(parquet_file)
+            if "time_str" not in df.columns and "time" in df.columns:
+                df["time_str"] = pd.to_datetime(df["time"], unit="s", utc=True).dt.strftime("%Y-%m-%dT%H:%M:%S.000000000Z")
+            n = len(df)
+            if n > 0:
+                first_row = df.iloc[0]
+                last_row = df.iloc[-1]
+                first_candle = {
+                    "time": int(first_row["time"]),
+                    "Time": str(first_row["time_str"]),
+                    "open": float(first_row["open"]),
+                    "high": float(first_row["high"]),
+                    "low": float(first_row["low"]),
+                    "close": float(first_row["close"]),
+                    "volume": int(first_row["volume"])
+                }
+                last_candle = {
+                    "time": int(last_row["time"]),
+                    "Time": str(last_row["time_str"]),
+                    "open": float(last_row["open"]),
+                    "high": float(last_row["high"]),
+                    "low": float(last_row["low"]),
+                    "close": float(last_row["close"]),
+                    "volume": int(last_row["volume"])
+                }
+            else:
+                first_candle = None
+                last_candle = None
+        except Exception:
+            first_candle = None
+            last_candle = None
+            n = 0
     else:
         first_candle = None
         last_candle = None
@@ -332,7 +378,7 @@ def write_chunk_to_disk(save_dir, symbol, timeframe, c_start, c_end, buf, now_ut
 # -----------------------------------------------------------------------------
 # Main
 # -----------------------------------------------------------------------------
-async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, save_dir, file_prefix=None, file_tf=None, is_standalone=None):
+async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, save_dir, file_prefix=None, file_tf=None, is_standalone=None, verified_chunks_set=None):
     os.makedirs(save_dir, exist_ok=True)
     now_utc = datetime.now(timezone.utc)
     if is_standalone is None:
@@ -385,6 +431,7 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
         for c_start, c_end in all_chunks:
             ss = c_start.strftime("%Y-%m-%d")
             es = (c_end - timedelta(days=1)).strftime("%Y-%m-%d")
+            chunk_key = f"{ss}_to_{es}"
             
             p_sym = file_prefix if file_prefix else symbol
             p_tf  = file_tf if file_tf else timeframe
@@ -393,13 +440,22 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
             csv_f = os.path.join(save_dir, f"{p_sym}_{p_tf}_{ss}_to_{es}.csv")
             data_file_exists = os.path.exists(parquet_f) or os.path.exists(csv_f)
             skip = False
-            if os.path.exists(pf) and data_file_exists:
+
+            # Check 1: Was this chunk already verified remotely (Hugging Face / GitHub / tracker)?
+            if verified_chunks_set and chunk_key in verified_chunks_set:
+                # If strictly in the past, chunk is 100% verified and permanently sealed!
+                if c_end <= global_latest_complete_dt:
+                    skip = True
+
+            # Check 2: Local POD file
+            if not skip and os.path.exists(pf):
                 try:
                     pod = json.load(open(pf))
                     status = pod.get("status")
                     if status in ("VERIFIED", "EMPTY"):
-                        skip = True
-                    elif status == "VERIFIED_PARTIAL":
+                        if c_end <= global_latest_complete_dt or data_file_exists:
+                            skip = True
+                    elif status == "VERIFIED_PARTIAL" and data_file_exists:
                         first_candle = pod.get("first_candle") or pod.get("csv_first_candle")
                         last_candle = pod.get("last_candle") or pod.get("csv_last_candle")
                         if first_candle and "Time" in first_candle and last_candle and "Time" in last_candle:
@@ -426,6 +482,28 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
         fetch_start = max(unverified_chunks[0][0], start_dt)
         max_valid_fetch_end = global_latest_complete_dt + timedelta(minutes=TIMEFRAME_MINUTES[timeframe])
         fetch_end   = min(unverified_chunks[-1][1], end_dt, max_valid_fetch_end)
+
+        # Micro-optimization for active partial chunk: if only 1 chunk to download, and local pod exists with last_candle:
+        if len(unverified_chunks) == 1:
+            u_start, u_end = unverified_chunks[0]
+            ss = u_start.strftime("%Y-%m-%d")
+            es = (u_end - timedelta(days=1)).strftime("%Y-%m-%d")
+            p_sym = file_prefix if file_prefix else symbol
+            p_tf  = file_tf if file_tf else timeframe
+            pf = os.path.join(save_dir, f"{p_sym}_{p_tf}_{ss}_to_{es}.pod")
+            parquet_f = os.path.join(save_dir, f"{p_sym}_{p_tf}_{ss}_to_{es}.parquet")
+            if os.path.exists(pf) and os.path.exists(parquet_f):
+                try:
+                    pod = json.load(open(pf))
+                    lc = pod.get("last_candle") or pod.get("csv_last_candle")
+                    if lc and "Time" in lc:
+                        lc_dt = datetime.strptime(lc["Time"][:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+                        # Fetch from 5 minutes before last candle to ensure perfect stitch
+                        adj_start = lc_dt - timedelta(minutes=5)
+                        if adj_start > fetch_start and adj_start < fetch_end:
+                            fetch_start = adj_start
+                except Exception:
+                    pass
         
         if fetch_start >= fetch_end:
             if is_standalone:
@@ -630,7 +708,7 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
             finally:
                 write_pool.shutdown(wait=False)
 
-def bulk_download_and_split(symbol, timeframe, start_dt, end_dt, chunk_size, save_dir, seconds_per_candle=None, file_prefix=None, file_tf=None, is_standalone=None):
+def bulk_download_and_split(symbol, timeframe, start_dt, end_dt, chunk_size, save_dir, seconds_per_candle=None, file_prefix=None, file_tf=None, is_standalone=None, verified_chunks_set=None):
     """
     Synchronous wrapper to safely run the asyncio downloader loop from inside
     a threaded web server environment (like Flask) without blocking the main event loop.
@@ -638,7 +716,7 @@ def bulk_download_and_split(symbol, timeframe, start_dt, end_dt, chunk_size, sav
     import threading
 
     def run_in_thread():
-        asyncio.run(_async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, save_dir, file_prefix, file_tf, is_standalone=is_standalone))
+        asyncio.run(_async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, save_dir, file_prefix, file_tf, is_standalone=is_standalone, verified_chunks_set=verified_chunks_set))
 
     thread = threading.Thread(target=run_in_thread, daemon=True)
     thread.start()

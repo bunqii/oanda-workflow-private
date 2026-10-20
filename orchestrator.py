@@ -541,60 +541,146 @@ def sync_ticker(inst_name, repo_name, tracker, summary_tracker):
         t_acq = time.time()
         source = "OANDA"
 
-        # Try reuse from GitHub (if GitHub is up-to-date and HF needs it)
-        if is_up_gh and needs_gh and gh_ready and not is_up_hf:
-            local_gh_dir = os.path.join(clone_dir, tf)
+        # Inventory of existing files on Hugging Face for this timeframe
+        hf_tf_prefix = f"{tf}/"
+        hf_tf_parquets = sorted([f for f in existing_hf_files if f.startswith(hf_tf_prefix) and f.endswith(".parquet")])
+        hf_tf_pods = set([f for f in existing_hf_files if f.startswith(hf_tf_prefix) and f.endswith(".pod")])
+
+        hf_verified_chunks = set()
+        for pq in hf_tf_parquets:
+            bname = os.path.basename(pq)
+            pname = bname.replace(".parquet", ".pod")
+            if f"{tf}/{pname}" in hf_tf_pods:
+                parts = bname.replace(".parquet", "").split("_")
+                if len(parts) >= 3 and parts[-2] == "to":
+                    hf_verified_chunks.add(f"{parts[-3]}_to_{parts[-1]}")
+
+        # Cross-Platform Reuse: Sync historical files between GitHub and Hugging Face if one has it and other is missing
+        if needs_gh and not is_up_gh and gh_ready:
+            gh_tf_dir = os.path.join(clone_dir, tf)
             if not os.path.isdir(os.path.join(clone_dir, ".git")):
                 run_cmd(f"git clone --quiet --depth 1 https://x-access-token:{GH_TOKEN}@github.com/{gh_user}/{repo_name}.git {clone_dir}")
-            if os.path.isdir(os.path.join(clone_dir, ".git")) and os.path.exists(local_gh_dir) and any(f.endswith(".parquet") for f in os.listdir(local_gh_dir)):
-                for f in os.listdir(local_gh_dir):
-                    shutil.copy2(os.path.join(local_gh_dir, f), os.path.join(tf_staging, f))
+
+            # If GitHub is missing the timeframe or parquet files, but Hugging Face has them:
+            if hf_tf_parquets and os.path.isdir(os.path.join(clone_dir, ".git")) and (not os.path.exists(gh_tf_dir) or not any(f.endswith(".parquet") for f in os.listdir(gh_tf_dir))):
+                print(f"  * [Reuse] Syncing {len(hf_tf_parquets)} historical files from Hugging Face to GitHub ({tf})...")
+                try:
+                    hf_cache = snapshot_download(repo_id=hf_repo_id, repo_type="dataset", allow_patterns=f"{tf}/*", token=HF_TOKEN, max_workers=16)
+                    hf_tf_cache = os.path.join(hf_cache, tf)
+                    if os.path.exists(hf_tf_cache):
+                        os.makedirs(gh_tf_dir, exist_ok=True)
+                        for f in os.listdir(hf_tf_cache):
+                            shutil.copy2(os.path.join(hf_tf_cache, f), os.path.join(gh_tf_dir, f))
+                except Exception as e:
+                    print(f"  [!] Reuse from HF failed: {e}")
+
+        # If Hugging Face is missing this timeframe entirely, but GitHub has it:
+        if needs_hf and not is_up_hf and not hf_tf_parquets and gh_ready:
+            gh_tf_dir = os.path.join(clone_dir, tf)
+            if not os.path.isdir(os.path.join(clone_dir, ".git")):
+                run_cmd(f"git clone --quiet --depth 1 https://x-access-token:{GH_TOKEN}@github.com/{gh_user}/{repo_name}.git {clone_dir}")
+            if os.path.exists(gh_tf_dir) and any(f.endswith(".parquet") for f in os.listdir(gh_tf_dir)):
+                print(f"  * [Reuse] Syncing historical files from GitHub to Hugging Face ({tf})...")
+                for f in os.listdir(gh_tf_dir):
+                    shutil.copy2(os.path.join(gh_tf_dir, f), os.path.join(tf_staging, f))
                 source = "GitHub"
 
-        # Try reuse from Hugging Face (if HF is up-to-date and GitHub needs it)
-        elif is_up_hf and needs_hf and not is_up_gh:
-            try:
-                hf_cache = snapshot_download(repo_id=hf_repo_id, repo_type="dataset", allow_patterns=f"{tf}/*", token=HF_TOKEN, max_workers=16)
-                hf_tf = os.path.join(hf_cache, tf)
-                if os.path.exists(hf_tf) and any(f.endswith(".parquet") for f in os.listdir(hf_tf)):
-                    for f in os.listdir(hf_tf):
-                        shutil.copy2(os.path.join(hf_tf, f), os.path.join(tf_staging, f))
-                    source = "HuggingFace"
-            except Exception:
-                pass
-
-        # Otherwise: download once from OANDA API
+        # Check if we still need to download/update from OANDA
         if not any(f.endswith(".parquet") for f in os.listdir(tf_staging)):
+            prev_active_rows = 0
+            # Download the single latest active chunk from Hugging Face into tf_staging to update it incrementally
+            if hf_tf_parquets:
+                latest_pq = hf_tf_parquets[-1]
+                latest_pod = latest_pq.replace(".parquet", ".pod")
+                try:
+                    hf_hub_download(repo_id=hf_repo_id, filename=latest_pq, repo_type="dataset", token=HF_TOKEN, local_dir=staging_base)
+                    pod_loc = hf_hub_download(repo_id=hf_repo_id, filename=latest_pod, repo_type="dataset", token=HF_TOKEN, local_dir=staging_base)
+                    with open(pod_loc) as pf:
+                        pdata = json.load(pf)
+                        prev_active_rows = pdata.get("row_count") or 0
+                except Exception:
+                    pass
+            elif needs_gh and gh_ready:
+                # If only GitHub has data, copy the latest active chunk from GitHub into tf_staging
+                gh_tf_dir = os.path.join(clone_dir, tf)
+                if os.path.exists(gh_tf_dir):
+                    gh_pqs = sorted([f for f in os.listdir(gh_tf_dir) if f.endswith(".parquet")])
+                    if gh_pqs:
+                        latest_gh_pq = gh_pqs[-1]
+                        latest_gh_pod = latest_gh_pq.replace(".parquet", ".pod")
+                        shutil.copy2(os.path.join(gh_tf_dir, latest_gh_pq), os.path.join(tf_staging, latest_gh_pq))
+                        if os.path.exists(os.path.join(gh_tf_dir, latest_gh_pod)):
+                            shutil.copy2(os.path.join(gh_tf_dir, latest_gh_pod), os.path.join(tf_staging, latest_gh_pod))
+                            try:
+                                with open(os.path.join(tf_staging, latest_gh_pod)) as pf:
+                                    prev_active_rows = json.load(pf).get("row_count") or 0
+                            except Exception:
+                                pass
+
+            # Aggregate verified chunks across both platforms
+            all_verified_chunks = set(hf_verified_chunks)
+            if needs_gh and gh_ready:
+                gh_tf_dir = os.path.join(clone_dir, tf)
+                if os.path.exists(gh_tf_dir):
+                    for f in os.listdir(gh_tf_dir):
+                        if f.endswith(".parquet") and os.path.exists(os.path.join(gh_tf_dir, f.replace(".parquet", ".pod"))):
+                            parts = f.replace(".parquet", "").split("_")
+                            if len(parts) >= 3 and parts[-2] == "to":
+                                all_verified_chunks.add(f"{parts[-3]}_to_{parts[-1]}")
+
             oanda_tf = map_oanda_tf(tf)
             chunk_size = get_chunk_size(tf)
-            bulk_download_and_split(inst_name, oanda_tf, None, None, chunk_size, tf_staging, file_prefix=repo_name, file_tf=tf, is_standalone=False)
+            bulk_download_and_split(
+                inst_name, oanda_tf, None, None, chunk_size, tf_staging,
+                file_prefix=repo_name, file_tf=tf, is_standalone=False,
+                verified_chunks_set=all_verified_chunks
+            )
             source = "OANDA"
 
         acq_s = time.time() - t_acq
 
-        # Read pod files to get accurate metadata
+        # Read pod files in staging to get accurate metadata for newly updated chunks
         pod_files = sorted([f for f in os.listdir(tf_staging) if f.endswith(".pod")])
         parquet_files = sorted([f for f in os.listdir(tf_staging) if f.endswith(".parquet")])
         csv_files = sorted([f for f in os.listdir(tf_staging) if f.endswith(".csv")])
         data_files = parquet_files if parquet_files else csv_files
-        
-        chunks = len(data_files)
-        total_rows = 0
-        first_candle = None
-        last_candle = None
+
+        staging_rows = 0
+        staging_first_candle = None
+        staging_last_candle = None
         for pf in pod_files:
             try:
                 with open(os.path.join(tf_staging, pf)) as p:
                     pdata = json.load(p)
-                    total_rows += pdata.get("row_count") or pdata.get("csv_row_count", 0)
+                    staging_rows += pdata.get("row_count") or pdata.get("csv_row_count", 0)
                     fc = pdata.get("first_candle") or pdata.get("csv_first_candle")
                     lc = pdata.get("last_candle") or pdata.get("csv_last_candle")
-                    if not first_candle and fc:
-                        first_candle = get_candle_time_str(fc)
+                    if not staging_first_candle and fc:
+                        staging_first_candle = get_candle_time_str(fc)
                     if lc:
-                        last_candle = get_candle_time_str(lc)
+                        staging_last_candle = get_candle_time_str(lc)
             except Exception:
                 pass
+
+        # Calculate accurate cumulative repository metadata
+        prev_hf_chunks = tracker.get(inst_name, {}).get("HuggingFace", {}).get(tf, {}).get("chunks_count") or len(hf_verified_chunks)
+        prev_hf_rows = tracker.get(inst_name, {}).get("HuggingFace", {}).get(tf, {}).get("total_rows") or 0
+        prev_first_candle = tracker.get(inst_name, {}).get("HuggingFace", {}).get(tf, {}).get("first_candle") or tracker.get(inst_name, {}).get("GitHub", {}).get(tf, {}).get("first_candle")
+
+        if len(data_files) < max(prev_hf_chunks, 2):
+            # Incremental / partial update: tf_staging only contains the active updated chunk(s)
+            chunks = max(prev_hf_chunks, len(hf_verified_chunks) + len(data_files))
+            added_rows = max(0, staging_rows - prev_active_rows) if 'prev_active_rows' in locals() else staging_rows
+            total_rows = max(prev_hf_rows + added_rows, staging_rows)
+            first_candle = prev_first_candle or staging_first_candle
+            last_candle = staging_last_candle or tracker.get(inst_name, {}).get("HuggingFace", {}).get(tf, {}).get("last_candle")
+        else:
+            # Full initial download of all chunks
+            chunks = len(data_files)
+            total_rows = staging_rows
+            first_candle = staging_first_candle
+            last_candle = staging_last_candle
+
         d_range = f"{clean_date_display(first_candle)} -> {clean_date_display(last_candle)}" if (first_candle and last_candle) else "-"
 
         # 4. Push immediately for each platform!

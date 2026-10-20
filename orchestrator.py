@@ -6,7 +6,7 @@ import shutil
 import base64
 import requests
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 # Reconfigure stdout/stderr to UTF-8 if possible
 if hasattr(sys.stdout, "reconfigure"):
@@ -79,6 +79,28 @@ def run_cmd(cmd, cwd=None):
         print(f"  [!] Command failed: {cmd}\n{res.stderr.strip()}")
         return False
     return True
+
+def force_remove_dir(path):
+    if not path or not os.path.exists(path):
+        return
+    def _handle_remove_readonly(func, p, exc):
+        try:
+            os.chmod(p, 0o777)
+            func(p)
+        except Exception:
+            pass
+    try:
+        shutil.rmtree(path, onerror=_handle_remove_readonly)
+    except Exception:
+        pass
+    if os.path.exists(path):
+        try:
+            if sys.platform == "win32":
+                subprocess.run(f'rmdir /s /q "{path}"', shell=True, capture_output=True)
+            else:
+                subprocess.run(f'rm -rf "{path}"', shell=True, capture_output=True)
+        except Exception:
+            pass
 
 def get_gh_username():
     user = os.environ.get("GH_USERNAME") or env_vars.get("GH_USERNAME")
@@ -303,10 +325,72 @@ class SyncSummaryTracker:
             print(f"  * HuggingFace: {hf_url}")
         print(f"{border}\n")
 
+TF_SECONDS = {
+    "5S": 5, "S5": 5,
+    "1": 60, "1M": 60, "M1": 60,
+    "5": 300, "5M": 300, "M5": 300,
+    "60": 3600, "60M": 3600, "H1": 3600, "1H": 3600,
+    "D": 86400, "DAILY": 86400, "1D": 86400,
+}
+
+TF_GRACE_SECONDS = {
+    "5S": 30, "S5": 30,
+    "1": 60, "1M": 60, "M1": 60,
+    "5": 120, "5M": 120, "M5": 120,
+    "60": 300, "60M": 300, "H1": 300, "1H": 300,
+    "D": 3600, "DAILY": 3600, "1D": 3600,
+}
+
+def is_candle_uptodate(last_dt, tf, now_dt=None, is_crypto=False):
+    if not last_dt:
+        return False
+    if now_dt is None:
+        now_dt = datetime.now(timezone.utc)
+    if last_dt.tzinfo is None:
+        last_dt = last_dt.replace(tzinfo=timezone.utc)
+    else:
+        last_dt = last_dt.astimezone(timezone.utc)
+
+    # 1. Market Weekend Check (for non-crypto forex / commodities)
+    if not is_crypto:
+        # Saturday: forex market is closed all day
+        if now_dt.weekday() == 5:
+            if last_dt.weekday() == 4 and last_dt.hour >= 20:
+                return True
+        # Sunday before 21:00 UTC: forex market is closed
+        elif now_dt.weekday() == 6 and now_dt.hour < 21:
+            if last_dt.weekday() == 4 and last_dt.hour >= 20:
+                return True
+
+    # 2. Daily Timeframe:
+    # On OANDA, daily candles start at 21:00 UTC and are timestamped with their start time.
+    # Therefore, a candle completing on Day T has timestamp (T - 1 day) at 21:00 UTC.
+    if tf in ("D", "DAILY", "1D"):
+        days_back = 2 if now_dt.hour < 21 else 1
+        expected_date = (now_dt - timedelta(days=days_back)).date()
+        if not is_crypto:
+            if now_dt.weekday() == 0 and now_dt.hour < 21:
+                expected_date = (now_dt - timedelta(days=4)).date()
+            elif now_dt.weekday() == 6:
+                expected_date = (now_dt - timedelta(days=3)).date()
+            elif now_dt.weekday() == 5:
+                expected_date = (now_dt - timedelta(days=2)).date()
+        return last_dt.date() >= expected_date
+
+    # 3. Intraday Timeframes:
+    # OANDA timestamps candles at their START (open) time.
+    # A candle of duration D starting at last_dt closes at (last_dt + D).
+    # The next candle will close at (last_dt + 2*D).
+    # With grace period G, last_dt is up-to-date as long as now_dt < last_dt + 2*D + G.
+    dur_sec = TF_SECONDS.get(tf, 60)
+    grace_sec = TF_GRACE_SECONDS.get(tf, 60)
+    expiry_dt = last_dt + timedelta(seconds=(2 * dur_sec + grace_sec))
+    return now_dt < expiry_dt
+
 # -----------------------------------------------------------------------------
 # GitHub Sync
 # -----------------------------------------------------------------------------
-def check_github_tf_uptodate(gh_user, repo_name, tf):
+def check_github_tf_uptodate(gh_user, repo_name, tf, inst_name=""):
     headers = {
         "Authorization": f"token {GH_TOKEN}",
         "Accept": "application/vnd.github+json"
@@ -347,7 +431,8 @@ def check_github_tf_uptodate(gh_user, repo_name, tf):
         if last_candle:
             last_dt = get_candle_dt(last_candle)
             now_dt = datetime.now(timezone.utc)
-            if last_dt and (now_dt - last_dt).days <= 2 and status in ["VERIFIED", "VERIFIED_PARTIAL"]:
+            is_crypto = any(c in (inst_name or repo_name).upper() for c in ["BTC", "ETH", "LTC", "BCH", "CRYPTO"])
+            if last_dt and is_candle_uptodate(last_dt, tf, now_dt, is_crypto) and status in ["VERIFIED", "VERIFIED_PARTIAL"]:
                 return True, {
                     "first_candle": get_candle_time_str(first_candle),
                     "last_candle": get_candle_time_str(last_candle),
@@ -382,7 +467,8 @@ def check_hf_tf_uptodate(api, repo_id, existing_hf_files, tf, tracker, inst_name
             if last_c:
                 last_dt = get_candle_dt(last_c)
                 now_dt = datetime.now(timezone.utc)
-                if last_dt and (now_dt - last_dt).days <= 2 and status in ["VERIFIED", "VERIFIED_PARTIAL"]:
+                is_crypto = any(c in (inst_name or repo_id).upper() for c in ["BTC", "ETH", "LTC", "BCH", "CRYPTO"])
+                if last_dt and is_candle_uptodate(last_dt, tf, now_dt, is_crypto) and status in ["VERIFIED", "VERIFIED_PARTIAL"]:
                     existing_total = tracker.get(inst_name, {}).get("HuggingFace", {}).get(tf, {}).get("total_rows") or tracker.get(inst_name, {}).get("GitHub", {}).get(tf, {}).get("total_rows") or pdata.get("row_count") or pdata.get("csv_row_count", 0)
                     existing_first = tracker.get(inst_name, {}).get("HuggingFace", {}).get(tf, {}).get("first_candle")
                     if not existing_first and first_pod_file != latest_pod_file:
@@ -444,6 +530,8 @@ def push_timeframe_github(clone_dir, tf, gh_user, repo_name, gh_repo_url):
     if p_res.returncode == 0:
         return "Pushed", f"{gh_repo_url}/commit/{commit_hash}", push_duration
     else:
+        if p_res.stderr and p_res.stderr.strip():
+            print(f"  [!] GitHub push error: {p_res.stderr.strip()}")
         return "Failed", f"{gh_repo_url}/tree/main/{tf}", push_duration
 
 def push_timeframe_huggingface(api, tf_dir, hf_repo_id, tf, hf_repo_url):
@@ -505,7 +593,7 @@ def sync_ticker(inst_name, repo_name, tracker, summary_tracker):
         
         # 1. Fast remote checks (<1s)
         t_check_gh = time.time()
-        is_up_gh, pod_gh = check_github_tf_uptodate(gh_user, repo_name, tf) if (needs_gh and gh_ready) else ((False if (needs_gh and not gh_ready) else True), None)
+        is_up_gh, pod_gh = check_github_tf_uptodate(gh_user, repo_name, tf, inst_name=inst_name) if (needs_gh and gh_ready) else ((False if (needs_gh and not gh_ready) else True), None)
         check_gh_s = time.time() - t_check_gh
 
         t_check_hf = time.time()
@@ -559,6 +647,7 @@ def sync_ticker(inst_name, repo_name, tracker, summary_tracker):
         if needs_gh and not is_up_gh and gh_ready:
             gh_tf_dir = os.path.join(clone_dir, tf)
             if not os.path.isdir(os.path.join(clone_dir, ".git")):
+                force_remove_dir(clone_dir)
                 run_cmd(f"git clone --quiet --depth 1 https://x-access-token:{GH_TOKEN}@github.com/{gh_user}/{repo_name}.git {clone_dir}")
 
             # If GitHub is missing the timeframe or parquet files, but Hugging Face has them:
@@ -578,6 +667,7 @@ def sync_ticker(inst_name, repo_name, tracker, summary_tracker):
         if needs_hf and not is_up_hf and not hf_tf_parquets and gh_ready:
             gh_tf_dir = os.path.join(clone_dir, tf)
             if not os.path.isdir(os.path.join(clone_dir, ".git")):
+                force_remove_dir(clone_dir)
                 run_cmd(f"git clone --quiet --depth 1 https://x-access-token:{GH_TOKEN}@github.com/{gh_user}/{repo_name}.git {clone_dir}")
             if os.path.exists(gh_tf_dir) and any(f.endswith(".parquet") for f in os.listdir(gh_tf_dir)):
                 print(f"  * [Reuse] Syncing historical files from GitHub to Hugging Face ({tf})...")
@@ -695,6 +785,7 @@ def sync_ticker(inst_name, repo_name, tracker, summary_tracker):
                 gh_status_str = f"GitHub: Up-to-date ({format_duration(check_gh_s)})"
             else:
                 if not os.path.isdir(os.path.join(clone_dir, ".git")):
+                    force_remove_dir(clone_dir)
                     run_cmd(f"git clone --quiet --depth 1 https://x-access-token:{GH_TOKEN}@github.com/{gh_user}/{repo_name}.git {clone_dir}")
                 
                 if not os.path.isdir(os.path.join(clone_dir, ".git")):
@@ -721,7 +812,7 @@ def sync_ticker(inst_name, repo_name, tracker, summary_tracker):
                 elif status_gh == "Up-to-date":
                     gh_status_str = f"GitHub: Up-to-date"
                 else:
-                    if status_gh != "Failed":
+                    if not gh_status_str:
                         gh_status_str = f"GitHub: Push Failed ({format_duration(push_gh_s)})"
 
                 if status_gh in ["Pushed", "Up-to-date"]:
@@ -778,29 +869,25 @@ def cleanup_ticker_resources(repo_name, hf_user):
     """
     # 1. Clean GitHub clone directory
     clone_dir = f"gh_clone_{repo_name}"
-    if os.path.exists(clone_dir):
-        shutil.rmtree(clone_dir, ignore_errors=True)
+    force_remove_dir(clone_dir)
 
     # 2. Clean temporary staging directory
     staging_dir = os.path.join("tmp_staging", repo_name)
-    if os.path.exists(staging_dir):
-        shutil.rmtree(staging_dir, ignore_errors=True)
+    force_remove_dir(staging_dir)
     if os.path.exists("tmp_staging"):
         try:
             if not os.listdir("tmp_staging"):
-                shutil.rmtree("tmp_staging", ignore_errors=True)
+                force_remove_dir("tmp_staging")
         except Exception:
             pass
 
-    if os.path.exists("tmp_hf"):
-        shutil.rmtree("tmp_hf", ignore_errors=True)
+    force_remove_dir("tmp_hf")
 
     # 3. Clean Hugging Face cached snapshot for this repo to save disk
     try:
         from huggingface_hub.constants import HUGGINGFACE_HUB_CACHE
         cache_repo_dir = os.path.join(HUGGINGFACE_HUB_CACHE, f"datasets--{hf_user}--{repo_name}")
-        if os.path.exists(cache_repo_dir):
-            shutil.rmtree(cache_repo_dir, ignore_errors=True)
+        force_remove_dir(cache_repo_dir)
     except Exception:
         pass
 

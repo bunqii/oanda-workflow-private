@@ -153,11 +153,11 @@ async def find_latest_complete_candle(client, instrument, timeframe, is_standalo
     if is_standalone:
         print(f"Fetching current market state for {instrument} ({timeframe})...")
     url = f"{OANDA_URL}/instruments/{instrument}/candles"
-    params = {"granularity": timeframe, "count": 2, "price": "M"}
+    params = {"granularity": timeframe, "count": 10, "price": "M"}
     
     for attempt in range(1, 4):
         try:
-            # Fetch last 2 candles of the exact timeframe to guarantee we find the last 'complete' candle
+            # Fetch last 10 candles to reliably find the latest 'complete' candle
             r = await client.get(url, params=params, headers=HEADERS, timeout=10.0)
             if r.status_code == 200:
                 candles = r.json().get('candles', [])
@@ -498,8 +498,9 @@ async def _async_bulk_download(symbol, timeframe, start_dt, end_dt, chunk_size, 
                     lc = pod.get("last_candle") or pod.get("csv_last_candle")
                     if lc and "Time" in lc:
                         lc_dt = datetime.strptime(lc["Time"][:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
-                        # Fetch from 5 minutes before last candle to ensure perfect stitch
-                        adj_start = lc_dt - timedelta(minutes=5)
+                        # Fetch from before last candle to ensure perfect stitch
+                        overlap_mins = max(5, TIMEFRAME_MINUTES.get(timeframe, 1))
+                        adj_start = lc_dt - timedelta(minutes=overlap_mins)
                         if adj_start > fetch_start and adj_start < fetch_end:
                             fetch_start = adj_start
                 except Exception:

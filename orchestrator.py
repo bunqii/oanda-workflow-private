@@ -297,7 +297,7 @@ class SyncSummaryTracker:
     def print_timeframe_summary(self, ticker, platform, tf, chunks, rows, first_dt, last_dt, status, link, dl_time_s=None, push_time_s=None, is_reused=False):
         pass
 
-    def print_ticker_summary(self, ticker, repo_name, ticker_total_duration=None):
+    def print_ticker_summary(self, ticker, repo_name, ticker_total_duration=None, current_idx=None, total_tickers=None):
         ticker_records = [r for r in self.records if r["ticker"] == ticker]
         if not ticker_records:
             return
@@ -313,12 +313,13 @@ class SyncSummaryTracker:
                 total_rows += r.get("rows", 0)
 
         dur_str = f"in {format_duration(ticker_total_duration)}" if ticker_total_duration else ""
+        prog_str = f"[{current_idx}/{total_tickers}] " if (current_idx and total_tickers) else ""
         gh_url = self.repo_links.get(ticker, {}).get("GitHub", "")
         hf_url = self.repo_links.get(ticker, {}).get("HuggingFace", "")
 
         border = "=" * 120
         print(f"\n{border}")
-        print(f"[COMPLETED] {ticker} ({repo_name}) {dur_str} | Total: {total_chunks:,d} chunks | {total_rows:,d} rows")
+        print(f"[COMPLETED] {prog_str}{ticker} ({repo_name}) {dur_str} | Total: {total_chunks:,d} chunks | {total_rows:,d} rows")
         if gh_url:
             print(f"  * GitHub:      {gh_url}")
         if hf_url:
@@ -922,11 +923,17 @@ def main():
         
     summary_tracker = SyncSummaryTracker()
 
-    for inst_name, inst_info in inst_dict.items():
+    total_tickers = len(inst_dict)
+    print(f"[*] Starting orchestrator: {total_tickers} instrument(s) in queue")
+
+    for idx, (inst_name, inst_info) in enumerate(inst_dict.items(), 1):
         repo_name = get_repo_name(inst_name, inst_dict)
         ticker_start_time = time.time()
+        done = idx - 1
+        remaining = total_tickers - idx
+        pct = (idx / total_tickers) * 100.0
         print(f"\n==================================================")
-        print(f"Processing: {inst_name} -> {repo_name}")
+        print(f"[{idx}/{total_tickers}] ({pct:.1f}%) Processing: {inst_name} -> {repo_name} | Done: {done} | Remaining: {remaining}")
         print(f"==================================================")
         
         try:
@@ -957,11 +964,11 @@ def main():
 
             # Print concise completion summary for this ticker
             ticker_total_duration = time.time() - ticker_start_time
-            summary_tracker.print_ticker_summary(inst_name, repo_name, ticker_total_duration=ticker_total_duration)
+            summary_tracker.print_ticker_summary(inst_name, repo_name, ticker_total_duration=ticker_total_duration, current_idx=idx, total_tickers=total_tickers)
         except Exception as ticker_err:
             print(f"  [!] Error processing ticker {inst_name}: {ticker_err}")
             ticker_total_duration = time.time() - ticker_start_time
-            summary_tracker.print_ticker_summary(inst_name, repo_name, ticker_total_duration=ticker_total_duration)
+            summary_tracker.print_ticker_summary(inst_name, repo_name, ticker_total_duration=ticker_total_duration, current_idx=idx, total_tickers=total_tickers)
         finally:
             hf_user = get_hf_username()
             cleanup_ticker_resources(repo_name, hf_user)

@@ -7532,68 +7532,68 @@
     "GitHub": {
       "1": {
         "first_candle": "2003-03-14T15:30:00.000000000Z",
-        "last_candle": "2026-11-02T06:19:00.000000000Z",
-        "total_rows": 2506270,
+        "last_candle": "2026-11-03T08:22:00.000000000Z",
+        "total_rows": 2506758,
         "chunks_count": 286,
         "format": "parquet",
         "platform": "GitHub",
-        "last_updated": "2026-11-02T06:20:24.381361+00:00"
+        "last_updated": "2026-11-03T08:23:39.810886+00:00"
       },
       "D": {
         "first_candle": "2003-03-16T22:00:00.000000000Z",
-        "last_candle": "2026-10-29T21:00:00.000000000Z",
-        "total_rows": 6006,
-        "chunks_count": 3,
+        "last_candle": "2026-11-01T22:00:00.000000000Z",
+        "total_rows": 6007,
+        "chunks_count": 4,
         "format": "parquet",
         "platform": "GitHub",
-        "last_updated": "2026-11-02T06:20:14.611150+00:00"
+        "last_updated": "2026-11-03T08:23:33.787253+00:00"
       }
     },
     "HuggingFace": {
       "1": {
         "first_candle": "2003-03-14T15:30:00.000000000Z",
-        "last_candle": "2026-11-02T06:19:00.000000000Z",
-        "total_rows": 2506270,
+        "last_candle": "2026-11-03T08:22:00.000000000Z",
+        "total_rows": 2506758,
         "chunks_count": 286,
         "format": "parquet",
         "platform": "HuggingFace",
-        "last_updated": "2026-11-02T06:20:25.523779+00:00"
+        "last_updated": "2026-11-03T08:23:40.558543+00:00"
       },
       "5": {
         "first_candle": "2003-03-14T15:30:00.000000000Z",
-        "last_candle": "2026-11-02T06:15:00.000000000Z",
-        "total_rows": 835575,
+        "last_candle": "2026-11-03T08:15:00.000000000Z",
+        "total_rows": 835760,
         "chunks_count": 286,
         "format": "parquet",
         "platform": "HuggingFace",
-        "last_updated": "2026-11-02T06:20:19.550486+00:00"
+        "last_updated": "2026-11-03T08:23:37.320690+00:00"
       },
       "60": {
         "first_candle": "2003-03-14T16:00:00.000000000Z",
-        "last_candle": "2026-11-02T05:00:00.000000000Z",
-        "total_rows": 103168,
+        "last_candle": "2026-11-03T07:00:00.000000000Z",
+        "total_rows": 103189,
         "chunks_count": 286,
         "format": "parquet",
         "platform": "HuggingFace",
-        "last_updated": "2026-11-02T06:20:17.386120+00:00"
+        "last_updated": "2026-11-03T08:23:36.060591+00:00"
       },
       "D": {
         "first_candle": "2003-03-16T22:00:00.000000000Z",
-        "last_candle": "2026-10-29T21:00:00.000000000Z",
-        "total_rows": 6006,
-        "chunks_count": 3,
+        "last_candle": "2026-11-01T22:00:00.000000000Z",
+        "total_rows": 6007,
+        "chunks_count": 4,
         "format": "parquet",
         "platform": "HuggingFace",
-        "last_updated": "2026-11-02T06:20:14.611332+00:00"
+        "last_updated": "2026-11-03T08:23:34.461081+00:00"
       },
       "5S": {
         "first_candle": "2003-03-14T15:30:00.000000000Z",
-        "last_candle": "2026-11-02T06:20:00.000000000Z",
-        "total_rows": 7374279,
+        "last_candle": "2026-11-03T08:23:15.000000000Z",
+        "total_rows": 7375403,
         "chunks_count": 1236,
         "format": "parquet",
         "platform": "HuggingFace",
-        "last_updated": "2026-11-02T06:20:28.827815+00:00"
+        "last_updated": "2026-11-03T08:23:42.158978+00:00"
       }
     }
   },
